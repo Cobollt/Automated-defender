@@ -27,7 +27,10 @@ class ThreatType(Enum):
     EXECUTABLE_SIGNATURE = "executable_signature"
     SUSPICIOUS_STRING = "suspicious_string"
     HIGH_ENTROPY = "high_entropy"
+
     ARCHIVE_BOMB_RISK = "archive_bomb_risk"
     UNSAFE_PATH = "unsafe_path"
     NESTED_ARCHIVE = "nested_archive"
+    ENCRYPTED_ARCHIVE = "encrypted_archive"
+    UNSUPPORTED_ARCHIVE = "unsupported_archive"
     UNKNOWN_FORMAT = "unknown_format"

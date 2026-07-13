@@ -1,32 +1,194 @@
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+from collections.abc import Callable
+from application.reporting_service import ReportingService
 
 from config import AppConfig
-from application.scanner_service import ScannerService
+from domain.interfaces import (
+    FileWatcherInterface,
+    NotifierInterface,
+    ScannerServiceInterface,
+)
+from domain.models import ScanResult
+from utils.logger import setup_logger
+
 
 class DownloadsEventHandler(FileSystemEventHandler):
-    def __init__(self, scanner: ScannerService) -> None:
-        self.scanner = scanner
+    def __init__(
+        self,
+        scanner: ScannerServiceInterface,
+        notifier: NotifierInterface,
+        reporting_service: ReportingService,
+        executor: ThreadPoolExecutor,
+        on_scan_completed: Callable[[ScanResult], None],
+    ) -> None:
+        self._scanner = scanner
+        self._notifier = notifier
+        self._reporting_service = reporting_service
+        self._executor = executor
+        self._on_scan_completed = on_scan_completed
+        self._logger = setup_logger()
 
-    def on_created(self, event) -> None:
+        self._processing_files: set[Path] = set()
+        self._processing_lock = threading.Lock()
+
+    def on_created(self, event: FileSystemEvent) -> None:
         if event.is_directory:
             return
 
-        file_path = Path(event.src_path)
-        self._handle_file(file_path)
+        self._schedule_file(Path(event.src_path))
 
-    def _handle_file(self, file_path: Path) -> None:
-        if not self._wait_until_file_ready(file_path):
-            print(f"[SKIP] File is not ready: {file_path}")
+    def on_moved(self, event: FileSystemEvent) -> None:
+        if event.is_directory:
             return
 
-        result = self.scanner.scan(file_path)
+        destination_path = getattr(event, "dest_path", None)
 
+        if destination_path:
+            self._schedule_file(Path(destination_path))
+
+    def _schedule_file(self, file_path: Path) -> None:
+        file_path = file_path.resolve()
+
+        if self._should_ignore(file_path):
+            return
+
+        with self._processing_lock:
+            if file_path in self._processing_files:
+                return
+
+            self._processing_files.add(file_path)
+
+        self._executor.submit(self._process_file, file_path)
+
+    def _process_file(self, file_path: Path) -> None:
+        try:
+            self._logger.info(
+                "Detected new file: %s",
+                file_path,
+            )
+
+            if not self._wait_until_file_ready(file_path):
+                self._logger.warning(
+                    "File did not become ready: %s",
+                    file_path,
+                )
+                return
+
+            result = self._scanner.scan(file_path)
+
+            report_path = (
+                self._reporting_service.save_scan_result(
+                    result
+                )
+            )
+
+            if report_path is not None:
+                self._logger.info(
+                    "Report saved for %s: %s",
+                    file_path,
+                    report_path,
+                )
+
+            self._print_result(result)
+
+            notification_sent = self._notifier.notify_scan_result(
+                result
+            )
+
+            if not notification_sent:
+                self._logger.warning(
+                    "System notification was not delivered for: %s",
+                    file_path,
+                )
+
+            result = self._scanner.scan(file_path)
+
+            self._print_result(result)
+
+            notification_sent = self._notifier.notify_scan_result(
+                result
+            )
+
+            if not notification_sent:
+                self._logger.warning(
+                    "System notification was not delivered for: %s",
+                    file_path,
+                )
+
+            self._on_scan_completed(result)
+
+        except Exception:
+            self._logger.exception(
+                "Unexpected error while processing file: %s",
+                file_path,
+            )
+
+        finally:
+            with self._processing_lock:
+                self._processing_files.discard(file_path)
+
+    def _should_ignore(self, file_path: Path) -> bool:
+        if file_path.name.startswith("."):
+            return True
+
+        return file_path.suffix.lower() in AppConfig.TEMP_DOWNLOAD_EXTENSIONS
+
+    def _wait_until_file_ready(self, file_path: Path) -> bool:
+        previous_size = -1
+        stable_checks = 0
+
+        deadline = (
+            time.monotonic()
+            + AppConfig.FILE_READY_TIMEOUT
+        )
+
+        while time.monotonic() < deadline:
+            if not file_path.exists():
+                return False
+
+            if not file_path.is_file():
+                return False
+
+            try:
+                current_size = file_path.stat().st_size
+
+                with file_path.open("rb"):
+                    pass
+
+            except (OSError, PermissionError):
+                stable_checks = 0
+                time.sleep(
+                    AppConfig.FILE_READY_CHECK_INTERVAL
+                )
+                continue
+
+            if current_size == previous_size:
+                stable_checks += 1
+            else:
+                previous_size = current_size
+                stable_checks = 0
+
+            if (
+                stable_checks
+                >= AppConfig.FILE_STABLE_CHECKS_REQUIRED
+            ):
+                return True
+
+            time.sleep(
+                AppConfig.FILE_READY_CHECK_INTERVAL
+            )
+
+        return False
+
+    def _print_result(self, result: ScanResult) -> None:
         print()
-        print("[SCAN COMPLETED]")
+        print("=== Scan completed ===")
         print("File:", result.target_path)
         print("Status:", result.status.value)
         print("Risk level:", result.risk_level.value)
@@ -34,49 +196,103 @@ class DownloadsEventHandler(FileSystemEventHandler):
         print("Files checked:", result.total_files_checked)
         print("Threats found:", result.total_threats_found)
 
-    def _wait_until_file_ready(self, file_path: Path) -> bool:
-        last_size = -1
+        if result.error_message:
+            print("Error:", result.error_message)
 
-        for _ in range(AppConfig.FILE_READY_TIMEOUT):
-            if not file_path.exists():
-                return False
+        for threat in result.archive_threats:
+            print("[ARCHIVE]", threat.description)
 
-            current_size = file_path.stat().st_size
-
-            if current_size == last_size:
-                return True
-
-            last_size = current_size
-            time.sleep(AppConfig.FILE_READY_CHECK_INTERVAL)
-
-        return False
+        for file_result in result.file_results:
+            for threat in file_result.threats:
+                print(
+                    "[FILE]",
+                    file_result.file_path.name,
+                    "-",
+                    threat.description,
+                )
 
 
-class DownloadsWatcher:
-    def __init__(self, scanner: ScannerService) -> None:
-        self.scanner = scanner
-        self.observer = Observer()
+class DownloadsWatcher(FileWatcherInterface):
+    def __init__(
+        self,
+        scanner: ScannerServiceInterface,
+        notifier: NotifierInterface,
+        reporting_service: ReportingService,
+        on_scan_completed: Callable[[ScanResult], None],
+        downloads_dir: Path | None = None,
+    ) -> None:
+        self._scanner = scanner
+        self._notifier = notifier
+        self._reporting_service = reporting_service
+        self._on_scan_completed = on_scan_completed
 
-    def start(self) -> None:
-        handler = DownloadsEventHandler(self.scanner)
-
-        self.observer.schedule(
-            handler,
-            str(AppConfig.DOWNLOADS_DIR),
-            recursive=False
+        self._downloads_dir = (
+            downloads_dir or AppConfig.DOWNLOADS_DIR
         )
 
-        self.observer.start()
+        self._observer = Observer()
 
-        print(f"Watching downloads folder: {AppConfig.DOWNLOADS_DIR}")
+        self._executor = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="file-scanner",
+        )
 
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            self.stop()
+        self._logger = setup_logger()
+        self._started = False
+
+    def start(self) -> None:
+        if self._started:
+            return
+
+        if not self._downloads_dir.exists():
+            raise FileNotFoundError(
+                "Downloads folder does not exist: "
+                f"{self._downloads_dir}"
+            )
+
+        handler = DownloadsEventHandler(
+            scanner=self._scanner,
+            notifier=self._notifier,
+            reporting_service=self._reporting_service,
+            executor=self._executor,
+            on_scan_completed=self._on_scan_completed,
+        )
+
+        self._observer.schedule(
+            event_handler=handler,
+            path=str(self._downloads_dir),
+            recursive=False,
+        )
+
+        self._observer.start()
+        self._started = True
+
+        self._logger.info(
+            "Watching downloads folder: %s",
+            self._downloads_dir,
+        )
+
+        print(
+            "Watching downloads folder:",
+            self._downloads_dir,
+        )
 
     def stop(self) -> None:
-        self.observer.stop()
-        self.observer.join()
+        if not self._started:
+            return
+
+        self._observer.stop()
+        self._observer.join()
+
+        self._executor.shutdown(
+            wait=True,
+            cancel_futures=False,
+        )
+
+        self._started = False
+
+        self._logger.info(
+            "Downloads watcher stopped"
+        )
+
         print("Downloads watcher stopped")

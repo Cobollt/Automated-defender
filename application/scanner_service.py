@@ -3,6 +3,11 @@ from pathlib import Path
 from domain.enums import ScanStatus
 from domain.models import ScanResult
 from infrastructure.archive_detector import ArchiveDetector
+from infrastructure.archive_readers.custom_archive_reader import (
+    CustomArchiveReader,
+)
+from infrastructure.archive_readers.tar_reader import TarArchiveReader
+from infrastructure.archive_readers.zip_reader import ZipArchiveReader
 from infrastructure.file_analyzer import FileAnalyzer
 from infrastructure.safe_extractor import SafeExtractor
 from infrastructure.temp_manager import TempManager
@@ -10,9 +15,15 @@ from infrastructure.temp_manager import TempManager
 
 class ScannerService:
     def __init__(self) -> None:
-        self.archive_detector = ArchiveDetector()
+        readers = [
+            ZipArchiveReader(),
+            TarArchiveReader(),
+            CustomArchiveReader(),
+        ]
+
+        self.archive_detector = ArchiveDetector(readers)
         self.file_analyzer = FileAnalyzer()
-        self.safe_extractor = SafeExtractor()
+        self.safe_extractor = SafeExtractor(self.archive_detector)
         self.temp_manager = TempManager()
 
     def scan(self, target_path: Path) -> ScanResult:
@@ -44,48 +55,89 @@ class ScannerService:
         result.file_results.append(file_result)
         result.total_files_checked += 1
 
-    def _scan_archive(self, archive_path: Path, result: ScanResult) -> None:
+    def _scan_archive(
+            self,
+            archive_path: Path,
+            result: ScanResult,
+            depth: int = 0,
+    ) -> None:
+        from config import AppConfig
+        from domain.enums import ThreatType
+        from domain.models import DetectedThreat
+
+        if depth >= AppConfig.MAX_ARCHIVE_DEPTH:
+            result.archive_threats.append(
+                DetectedThreat(
+                    threat_type=ThreatType.NESTED_ARCHIVE,
+                    description=(
+                        "Maximum nested archive depth reached: "
+                        f"{AppConfig.MAX_ARCHIVE_DEPTH}"
+                    ),
+                    score=35,
+                    file_path=archive_path,
+                )
+            )
+            return
+
         archive_threats = self.safe_extractor.inspect_archive(archive_path)
+        result.archive_threats.extend(archive_threats)
 
         temp_dir = self.temp_manager.create_temp_dir()
 
         try:
-            extracted_files = self.safe_extractor.extract(archive_path, temp_dir)
+            extracted_files = self.safe_extractor.extract(
+                archive_path,
+                temp_dir,
+            )
 
             for extracted_file in extracted_files:
-                file_result = self.file_analyzer.analyze(extracted_file)
+                if self.archive_detector.is_archive(extracted_file):
+                    result.archive_threats.append(
+                        DetectedThreat(
+                            threat_type=ThreatType.NESTED_ARCHIVE,
+                            description=(
+                                f"Nested archive detected at depth {depth + 1}: "
+                                f"{extracted_file.name}"
+                            ),
+                            score=10,
+                            file_path=extracted_file,
+                        )
+                    )
 
-                for threat in archive_threats:
-                    file_result.threats.append(threat)
-                    file_result.risk_score += threat.score
+                    self._scan_archive(
+                        archive_path=extracted_file,
+                        result=result,
+                        depth=depth + 1,
+                    )
+                    continue
 
-                file_result.risk_score = min(file_result.risk_score, 100)
-                file_result.risk_level = self.file_analyzer._calculate_risk_level(
-                    file_result.risk_score
-                )
-
-                result.file_results.append(file_result)
-                result.total_files_checked += 1
+                self._scan_single_file(extracted_file, result)
 
         finally:
             self.temp_manager.cleanup(temp_dir)
 
     def _finalize_result(self, result: ScanResult) -> None:
-        if not result.file_results:
-            result.total_threats_found = 0
-            result.risk_score = 0
-            result.risk_level = self.file_analyzer._calculate_risk_level(0)
-            return
-
-        result.total_threats_found = sum(
+        file_threats_count = sum(
             len(file_result.threats)
             for file_result in result.file_results
         )
 
-        result.risk_score = max(
+        result.total_threats_found = (
+                file_threats_count
+                + len(result.archive_threats)
+        )
+
+        scores = [
             file_result.risk_score
             for file_result in result.file_results
+        ]
+
+        scores.extend(
+            threat.score
+            for threat in result.archive_threats
         )
+
+        result.risk_score = min(max(scores, default=0), 100)
 
         result.risk_level = self.file_analyzer._calculate_risk_level(
             result.risk_score

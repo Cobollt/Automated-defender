@@ -1,28 +1,27 @@
 from pathlib import Path
 
+from domain.archive_interfaces import ArchiveReaderInterface
+
 
 class ArchiveDetector:
-    ARCHIVE_EXTENSIONS = {
-        ".zip",
-        ".tar",
-        ".gz",
-        ".tgz",
-        ".bz2",
-        ".xz",
-        ".7z",
-        ".rar",
-    }
-
-    ZIP_MAGIC = b"PK\x03\x04"
+    def __init__(
+        self,
+        readers: list[ArchiveReaderInterface],
+    ) -> None:
+        self._readers = readers
 
     def is_archive(self, file_path: Path) -> bool:
-        if file_path.suffix.lower() in self.ARCHIVE_EXTENSIONS:
-            return True
+        return self.get_reader(file_path) is not None
 
-        try:
-            with file_path.open("rb") as file:
-                header = file.read(4)
-        except OSError:
-            return False
+    def get_reader(
+        self,
+        file_path: Path,
+    ) -> ArchiveReaderInterface | None:
+        for reader in self._readers:
+            try:
+                if reader.supports(file_path):
+                    return reader
+            except (OSError, ValueError):
+                continue
 
-        return header.startswith(self.ZIP_MAGIC)
+        return None

@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from domain.enums import RiskLevel, ScanStatus, ThreatType
+from domain.enums import FileAction, RiskLevel, ScanStatus, ThreatType
 
 
 @dataclass
@@ -32,7 +32,10 @@ class ScanResult:
     total_threats_found: int = 0
     risk_score: int = 0
     risk_level: RiskLevel = RiskLevel.SAFE
+
+    archive_threats: list[DetectedThreat] = field(default_factory=list)
     file_results: list[FileScanResult] = field(default_factory=list)
+
     error_message: str | None = None
 
     def complete(self) -> None:
@@ -52,3 +55,30 @@ class QuarantineResult:
     original_path: Path
     quarantine_path: Path | None = None
     message: str | None = None
+
+
+@dataclass
+class SystemSecurityResult:
+    success: bool
+    provider_name: str
+    file_path: Path
+    threat_detected: bool = False
+    file_isolated: bool = False
+    message: str | None = None
+
+
+@dataclass
+class ActionResult:
+    success: bool
+    action: FileAction
+    file_path: Path
+    message: str
+
+
+@dataclass
+class ActionResult:
+    success: bool
+    action: FileAction
+    file_path: Path
+    message: str
+    quarantine_result: QuarantineResult | None = None
