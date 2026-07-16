@@ -10,27 +10,51 @@ class ApplicationCommandBuilder:
         return Path(sys.executable).resolve()
 
     @staticmethod
-    def application_path() -> Path:
-        if getattr(sys, "frozen", False):
-            return Path(sys.executable).resolve()
-
-        return (AppConfig.BASE_DIR / "app.py").resolve()
+    def source_entry_path() -> Path:
+        return (
+            AppConfig.SOURCE_DIR
+            / "app.py"
+        ).resolve()
 
     @classmethod
     def build_arguments(cls) -> list[str]:
-        if getattr(sys, "frozen", False):
-            return [str(cls.application_path())]
+        if AppConfig.is_frozen():
+            return [
+                str(cls.executable_path())
+            ]
 
         return [
             str(cls.executable_path()),
-            str(cls.application_path()),
+            str(cls.source_entry_path()),
         ]
 
     @classmethod
     def build_windows_command(cls) -> str:
-        arguments = cls.build_arguments()
-
         return " ".join(
-            f'"{argument}"'
-            for argument in arguments
+            cls._quote_windows_argument(argument)
+            for argument in cls.build_arguments()
         )
+
+    @classmethod
+    def build_macos_program_arguments(
+        cls,
+    ) -> list[str]:
+        return cls.build_arguments()
+
+    @classmethod
+    def working_directory(cls) -> Path:
+        if AppConfig.is_frozen():
+            return cls.executable_path().parent
+
+        return AppConfig.SOURCE_DIR.resolve()
+
+    @staticmethod
+    def _quote_windows_argument(
+        argument: str,
+    ) -> str:
+        escaped_argument = argument.replace(
+            '"',
+            '\\"',
+        )
+
+        return f'"{escaped_argument}"'

@@ -66,7 +66,10 @@ class DownloadsEventHandler(FileSystemEventHandler):
 
         self._executor.submit(self._process_file, file_path)
 
-    def _process_file(self, file_path: Path) -> None:
+    def _process_file(
+            self,
+            file_path: Path,
+    ) -> None:
         try:
             self._logger.info(
                 "Detected new file: %s",
@@ -80,6 +83,7 @@ class DownloadsEventHandler(FileSystemEventHandler):
                 )
                 return
 
+            # Сканирование должно вызываться только один раз.
             result = self._scanner.scan(file_path)
 
             report_path = (
@@ -97,22 +101,10 @@ class DownloadsEventHandler(FileSystemEventHandler):
 
             self._print_result(result)
 
-            notification_sent = self._notifier.notify_scan_result(
-                result
-            )
-
-            if not notification_sent:
-                self._logger.warning(
-                    "System notification was not delivered for: %s",
-                    file_path,
+            notification_sent = (
+                self._notifier.notify_scan_result(
+                    result
                 )
-
-            result = self._scanner.scan(file_path)
-
-            self._print_result(result)
-
-            notification_sent = self._notifier.notify_scan_result(
-                result
             )
 
             if not notification_sent:

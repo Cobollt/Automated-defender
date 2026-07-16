@@ -13,13 +13,20 @@ from domain.models import (
 
 class FileAnalyzerInterface(ABC):
     @abstractmethod
-    def analyze(self, file_path: Path) -> FileScanResult:
+    def analyze(
+        self,
+        file_path: Path,
+        relative_path: str | None = None,
+    ) -> FileScanResult:
         pass
 
 
 class ScannerServiceInterface(ABC):
     @abstractmethod
-    def scan(self, target_path: Path) -> ScanResult:
+    def scan(
+        self,
+        target_path: Path,
+    ) -> ScanResult:
         pass
 
 
@@ -29,6 +36,15 @@ class QuarantineProviderInterface(ABC):
         self,
         file_path: Path,
     ) -> QuarantineResult:
+        pass
+
+
+class SystemSecurityProviderInterface(ABC):
+    @abstractmethod
+    def report_and_quarantine(
+        self,
+        file_path: Path,
+    ) -> SystemSecurityResult:
         pass
 
 
@@ -64,39 +80,20 @@ class ActionServiceInterface(ABC):
     def execute(
         self,
         action: FileAction,
-        file_path: Path,
+        scan_result: ScanResult,
     ) -> ActionResult:
-        pass
-
-
-class SystemSecurityProviderInterface(ABC):
-    @abstractmethod
-    def report_and_quarantine(
-        self,
-        file_path: Path,
-    ) -> SystemSecurityResult:
-        """
-        Передаёт файл системной защите.
-
-        success=True означает, что запрос выполнен.
-        file_isolated=True означает, что файл действительно
-        удалён или помещён в системный карантин.
-        """
         pass
 
 
 class AutostartServiceInterface(ABC):
     @abstractmethod
     def enable(self) -> bool:
-        """Включает автоматический запуск приложения."""
         pass
 
     @abstractmethod
     def disable(self) -> bool:
-        """Отключает автоматический запуск приложения."""
         pass
 
     @abstractmethod
     def is_enabled(self) -> bool:
-        """Проверяет, включён ли автоматический запуск."""
         pass

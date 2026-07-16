@@ -1,6 +1,5 @@
 import queue
 import tkinter as tk
-from pathlib import Path
 from tkinter import messagebox
 
 from domain.enums import FileAction, RiskLevel
@@ -53,7 +52,7 @@ class ActionWindow:
 
     def _show_result_window(
         self,
-        result: ScanResult,
+        scan_result: ScanResult,
     ) -> None:
         window = tk.Toplevel(self._root)
         window.title("AntiArchiveScanner")
@@ -62,8 +61,8 @@ class ActionWindow:
         window.protocol(
             "WM_DELETE_WINDOW",
             lambda: self._keep_and_close(
-                result.target_path,
-                window,
+                scan_result=scan_result,
+                window=window,
             ),
         )
 
@@ -76,18 +75,23 @@ class ActionWindow:
 
         title_label = tk.Label(
             content,
-            text=self._risk_title(result.risk_level),
+            text=self._risk_title(
+                scan_result.risk_level
+            ),
             font=("Arial", 16, "bold"),
         )
-        title_label.pack(pady=(0, 10))
+        title_label.pack(
+            pady=(0, 10)
+        )
 
         information = (
-            f"Файл: {result.target_path.name}\n"
-            f"Путь: {result.target_path}\n"
-            f"Уровень риска: {result.risk_level.value}\n"
-            f"Оценка риска: {result.risk_score}/100\n"
-            f"Проверено файлов: {result.total_files_checked}\n"
-            f"Найдено признаков: {result.total_threats_found}"
+            f"Файл: {scan_result.target_path.name}\n"
+            f"Путь: {scan_result.target_path}\n"
+            f"SHA-256: {scan_result.target_sha256 or 'не вычислен'}\n"
+            f"Уровень риска: {scan_result.risk_level.value}\n"
+            f"Оценка риска: {scan_result.risk_score}/100\n"
+            f"Проверено файлов: {scan_result.total_files_checked}\n"
+            f"Найдено признаков: {scan_result.total_threats_found}"
         )
 
         info_label = tk.Label(
@@ -95,17 +99,23 @@ class ActionWindow:
             text=information,
             justify="left",
             anchor="w",
-            wraplength=520,
+            wraplength=620,
         )
-        info_label.pack(pady=(0, 15))
+        info_label.pack(
+            pady=(0, 15)
+        )
 
         recommendation_label = tk.Label(
             content,
-            text=self._recommendation(result.risk_level),
+            text=self._recommendation(
+                scan_result.risk_level
+            ),
             justify="left",
-            wraplength=520,
+            wraplength=620,
         )
-        recommendation_label.pack(pady=(0, 20))
+        recommendation_label.pack(
+            pady=(0, 20)
+        )
 
         buttons = tk.Frame(content)
         buttons.pack()
@@ -116,7 +126,7 @@ class ActionWindow:
             width=18,
             command=lambda: self._execute_action(
                 action=FileAction.KEEP,
-                file_path=result.target_path,
+                scan_result=scan_result,
                 window=window,
             ),
         )
@@ -131,7 +141,7 @@ class ActionWindow:
             text="Удалить",
             width=18,
             command=lambda: self._confirm_delete(
-                file_path=result.target_path,
+                scan_result=scan_result,
                 window=window,
             ),
         )
@@ -147,7 +157,7 @@ class ActionWindow:
             width=24,
             command=lambda: self._execute_action(
                 action=FileAction.QUARANTINE,
-                file_path=result.target_path,
+                scan_result=scan_result,
                 window=window,
             ),
         )
@@ -168,20 +178,23 @@ class ActionWindow:
         x = (screen_width - width) // 2
         y = (screen_height - height) // 2
 
-        window.geometry(f"+{x}+{y}")
+        window.geometry(
+            f"+{x}+{y}"
+        )
+
         window.lift()
         window.focus_force()
 
     def _confirm_delete(
         self,
-        file_path: Path,
+        scan_result: ScanResult,
         window: tk.Toplevel,
     ) -> None:
         confirmed = messagebox.askyesno(
             title="Подтверждение удаления",
             message=(
-                f"Удалить файл без возможности восстановления?\n\n"
-                f"{file_path}"
+                "Удалить файл без возможности восстановления?\n\n"
+                f"{scan_result.target_path}"
             ),
             parent=window,
         )
@@ -191,45 +204,47 @@ class ActionWindow:
 
         self._execute_action(
             action=FileAction.DELETE,
-            file_path=file_path,
+            scan_result=scan_result,
             window=window,
         )
 
     def _execute_action(
         self,
         action: FileAction,
-        file_path: Path,
+        scan_result: ScanResult,
         window: tk.Toplevel,
     ) -> None:
-        result = self._action_service.execute(
+        action_result = self._action_service.execute(
             action=action,
-            file_path=file_path,
+            scan_result=scan_result,
         )
 
-        if result.success:
+        if action_result.success:
             messagebox.showinfo(
                 title="Действие выполнено",
-                message=result.message,
+                message=action_result.message,
                 parent=window,
             )
+
             window.destroy()
             return
 
         messagebox.showerror(
             title="Ошибка",
-            message=result.message,
+            message=action_result.message,
             parent=window,
         )
 
     def _keep_and_close(
         self,
-        file_path: Path,
+        scan_result: ScanResult,
         window: tk.Toplevel,
     ) -> None:
         self._action_service.execute(
             action=FileAction.KEEP,
-            file_path=file_path,
+            scan_result=scan_result,
         )
+
         window.destroy()
 
     def _risk_title(
@@ -265,10 +280,12 @@ class ActionWindow:
                 "Рекомендуется переместить файл в карантин."
             ),
             RiskLevel.HIGH: (
-                "Не открывайте файл. Рекомендуется карантин или удаление."
+                "Не открывайте файл. "
+                "Рекомендуется карантин или удаление."
             ),
             RiskLevel.CRITICAL: (
-                "Не открывайте файл. Немедленно переместите его "
+                "Не открывайте файл. "
+                "Немедленно переместите его "
                 "в карантин или удалите."
             ),
         }

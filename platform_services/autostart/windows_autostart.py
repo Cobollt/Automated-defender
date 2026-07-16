@@ -28,6 +28,8 @@ class WindowsAutostartService(AutostartServiceInterface):
                     command,
                     "/SC",
                     "ONLOGON",
+                    "/RL",
+                    "LIMITED",
                     "/F",
                 ],
                 capture_output=True,
@@ -40,8 +42,10 @@ class WindowsAutostartService(AutostartServiceInterface):
             if result.returncode != 0:
                 self._logger.error(
                     "Unable to enable Windows autostart: %s",
-                    result.stderr.strip()
-                    or result.stdout.strip(),
+                    (
+                        result.stderr.strip()
+                        or result.stdout.strip()
+                    ),
                 )
                 return False
 
@@ -78,26 +82,27 @@ class WindowsAutostartService(AutostartServiceInterface):
                 creationflags=self._creation_flags(),
             )
 
-            if result.returncode != 0:
-                output = (
+            if result.returncode == 0:
+                self._logger.info(
+                    "Windows autostart disabled"
+                )
+                return True
+
+            if not self.is_enabled():
+                self._logger.info(
+                    "Windows autostart task is already absent"
+                )
+                return True
+
+            self._logger.error(
+                "Unable to disable Windows autostart: %s",
+                (
                     result.stderr.strip()
                     or result.stdout.strip()
-                )
-
-                if not self.is_enabled():
-                    return True
-
-                self._logger.error(
-                    "Unable to disable Windows autostart: %s",
-                    output,
-                )
-                return False
-
-            self._logger.info(
-                "Windows autostart disabled"
+                ),
             )
 
-            return True
+            return False
 
         except (
             OSError,

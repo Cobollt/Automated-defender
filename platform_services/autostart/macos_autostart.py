@@ -1,3 +1,4 @@
+import os
 import plistlib
 import subprocess
 from pathlib import Path
@@ -25,7 +26,9 @@ class MacOSAutostartService(AutostartServiceInterface):
             / f"{AppConfig.MACOS_LAUNCH_AGENT_LABEL}.plist"
         )
 
-        self._user_domain = f"gui/{self._get_user_id()}"
+        self._user_domain = (
+            f"gui/{os.getuid()}"
+        )
 
     def enable(self) -> bool:
         AppConfig.prepare_dirs()
@@ -38,14 +41,17 @@ class MacOSAutostartService(AutostartServiceInterface):
         plist_data = {
             "Label": AppConfig.MACOS_LAUNCH_AGENT_LABEL,
             "ProgramArguments": (
-                ApplicationCommandBuilder.build_arguments()
+                ApplicationCommandBuilder
+                .build_macos_program_arguments()
             ),
             "WorkingDirectory": str(
-                AppConfig.BASE_DIR.resolve()
+                ApplicationCommandBuilder
+                .working_directory()
             ),
             "RunAtLoad": True,
             "KeepAlive": False,
             "ProcessType": "Interactive",
+            "LimitLoadToSessionType": "Aqua",
             "StandardOutPath": str(
                 AppConfig.AUTOSTART_STDOUT_LOG.resolve()
             ),
@@ -55,9 +61,11 @@ class MacOSAutostartService(AutostartServiceInterface):
         }
 
         try:
-            self.disable()
+            self._unload_existing_agent()
 
-            with self._plist_path.open("wb") as plist_file:
+            with self._plist_path.open(
+                "wb"
+            ) as plist_file:
                 plistlib.dump(
                     plist_data,
                     plist_file,
@@ -82,7 +90,10 @@ class MacOSAutostartService(AutostartServiceInterface):
             if result.returncode != 0:
                 self._logger.error(
                     "Unable to enable macOS autostart: %s",
-                    result.stderr.strip(),
+                    (
+                        result.stderr.strip()
+                        or result.stdout.strip()
+                    ),
                 )
                 return False
 
@@ -106,30 +117,12 @@ class MacOSAutostartService(AutostartServiceInterface):
     def disable(self) -> bool:
         success = True
 
+        self._unload_existing_agent()
+
         if self._plist_path.exists():
-            result = subprocess.run(
-                [
-                    "launchctl",
-                    "bootout",
-                    self._user_domain,
-                    str(self._plist_path),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=15,
-            )
-
-            # Если агент не загружен, bootout может вернуть ошибку.
-            # Это не мешает удалить plist.
-            if result.returncode != 0:
-                self._logger.info(
-                    "LaunchAgent was not loaded or could not be unloaded: %s",
-                    result.stderr.strip(),
-                )
-
             try:
                 self._plist_path.unlink()
+
             except OSError as error:
                 self._logger.error(
                     "Unable to remove LaunchAgent plist: %s",
@@ -137,18 +130,72 @@ class MacOSAutostartService(AutostartServiceInterface):
                 )
                 success = False
 
+        if success:
+            self._logger.info(
+                "macOS autostart disabled"
+            )
+
         return success
 
     def is_enabled(self) -> bool:
-        return self._plist_path.exists()
+        if not self._plist_path.exists():
+            return False
 
-    def _get_user_id(self) -> int:
-        result = subprocess.run(
-            ["id", "-u"],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "launchctl",
+                    "print",
+                    (
+                        f"{self._user_domain}/"
+                        f"{AppConfig.MACOS_LAUNCH_AGENT_LABEL}"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
 
-        return int(result.stdout.strip())
+            return result.returncode == 0
+
+        except (
+            OSError,
+            subprocess.SubprocessError,
+        ):
+            return False
+
+    def _unload_existing_agent(self) -> None:
+        try:
+            result = subprocess.run(
+                [
+                    "launchctl",
+                    "bootout",
+                    (
+                        f"{self._user_domain}/"
+                        f"{AppConfig.MACOS_LAUNCH_AGENT_LABEL}"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+
+            if result.returncode != 0:
+                self._logger.debug(
+                    "LaunchAgent was not loaded: %s",
+                    (
+                        result.stderr.strip()
+                        or result.stdout.strip()
+                    ),
+                )
+
+        except (
+            OSError,
+            subprocess.SubprocessError,
+        ) as error:
+            self._logger.debug(
+                "Unable to unload existing LaunchAgent: %s",
+                error,
+            )

@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from config import AppConfig
-from domain.models import ActionResult, QuarantineResult, ScanResult
+from domain.models import (
+    ActionResult,
+    QuarantineResult,
+    ScanResult,
+)
 from utils.logger import setup_logger
 
 
@@ -36,7 +40,9 @@ class HistoryStorage:
         record = {
             "record_type": "scan",
             "recorded_at": self._utc_now(),
+            "target_name": result.target_path.name,
             "target_path": str(result.target_path),
+            "target_sha256": result.target_sha256,
             "status": result.status.value,
             "risk_level": result.risk_level.value,
             "risk_score": result.risk_score,
@@ -69,25 +75,44 @@ class HistoryStorage:
         record: dict[str, Any] = {
             "record_type": "action",
             "recorded_at": self._utc_now(),
+            "file_name": result.file_path.name,
             "file_path": str(result.file_path),
+            "sha256": result.sha256,
+            "risk_score": result.risk_score,
+            "risk_level": (
+                result.risk_level.value
+                if result.risk_level is not None
+                else None
+            ),
             "action": result.action.value,
             "success": result.success,
             "message": result.message,
         }
 
-        if quarantine_result is not None:
+        effective_quarantine_result = (
+            quarantine_result
+            or result.quarantine_result
+        )
+
+        if effective_quarantine_result is not None:
             record["quarantine"] = {
-                "success": quarantine_result.success,
-                "provider_name": quarantine_result.provider_name,
+                "success": effective_quarantine_result.success,
+                "provider_name": (
+                    effective_quarantine_result.provider_name
+                ),
                 "original_path": str(
-                    quarantine_result.original_path
+                    effective_quarantine_result.original_path
                 ),
                 "quarantine_path": (
-                    str(quarantine_result.quarantine_path)
-                    if quarantine_result.quarantine_path
+                    str(
+                        effective_quarantine_result.quarantine_path
+                    )
+                    if effective_quarantine_result.quarantine_path
                     else None
                 ),
-                "message": quarantine_result.message,
+                "message": (
+                    effective_quarantine_result.message
+                ),
             }
 
         return self._append_record(
@@ -98,7 +123,7 @@ class HistoryStorage:
     def _append_record(
         self,
         path: Path,
-        record: dict,
+        record: dict[str, Any],
     ) -> bool:
         path.parent.mkdir(
             parents=True,
@@ -119,8 +144,12 @@ class HistoryStorage:
                     history_file.write(
                         serialized_record + "\n"
                     )
-
                     history_file.flush()
+
+            self._logger.info(
+                "History record saved: %s",
+                path,
+            )
 
             return True
 
@@ -130,6 +159,7 @@ class HistoryStorage:
                 path,
                 error,
             )
+
             return False
 
     def _utc_now(self) -> str:

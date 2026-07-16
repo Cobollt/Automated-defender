@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from domain.models import ActionResult, QuarantineResult, ScanResult
+from domain.models import (
+    ActionResult,
+    QuarantineResult,
+    ScanResult,
+)
 from infrastructure.history_storage import HistoryStorage
 from infrastructure.report_writer import ReportWriter
 from utils.logger import setup_logger
@@ -20,18 +24,26 @@ class ReportingService:
         self,
         result: ScanResult,
     ) -> Path | None:
-        report_path = (
-            self._report_writer.write_scan_report(
-                result
-            )
+        report_path = self._report_writer.write_scan_report(
+            result
         )
 
-        history_saved = (
-            self._history_storage.save_scan(
-                result=result,
-                report_path=report_path,
-            )
+        history_saved = self._history_storage.save_scan(
+            result=result,
+            report_path=report_path,
         )
+
+        if report_path is None:
+            self._logger.warning(
+                "Scan report was not created for: %s",
+                result.target_path,
+            )
+        else:
+            self._logger.info(
+                "Scan report saved for %s: %s",
+                result.target_path,
+                report_path,
+            )
 
         if not history_saved:
             self._logger.warning(
@@ -46,14 +58,29 @@ class ReportingService:
         result: ActionResult,
         quarantine_result: QuarantineResult | None = None,
     ) -> bool:
-        saved = self._history_storage.save_action(
-            result=result,
-            quarantine_result=quarantine_result,
+        effective_quarantine_result = (
+            quarantine_result
+            or result.quarantine_result
         )
 
-        if not saved:
+        saved = self._history_storage.save_action(
+            result=result,
+            quarantine_result=effective_quarantine_result,
+        )
+
+        if saved:
+            self._logger.info(
+                "Action history saved: "
+                "action=%s file=%s success=%s",
+                result.action.value,
+                result.file_path,
+                result.success,
+            )
+        else:
             self._logger.warning(
-                "Action history was not saved for: %s",
+                "Action history was not saved: "
+                "action=%s file=%s",
+                result.action.value,
                 result.file_path,
             )
 
