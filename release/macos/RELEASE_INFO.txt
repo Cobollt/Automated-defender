@@ -1,0 +1,10 @@
+Application: AntiArchiveScanner
+Version: 1.0.0
+Platform: macos
+Architecture: arm64
+Python: 3.14.6
+Installer: AntiArchiveScanner.dmg
+Installer SHA-256: 174d6f285eb784445e80415eaec8e9b3d26fef8ef257a0556d929197360d5174
+Portable: AntiArchiveScanner-portable.zip
+Portable SHA-256: 09edca62d59f21109bdd0a1a9c7c142520731eea043fc1379f23b50b8f4386e3
+Created: 2026-07-22T10:29:03.663884+00:00
