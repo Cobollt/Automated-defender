@@ -10,11 +10,11 @@ Cross-platform application for automatic scanning of downloaded files and archiv
 
 Download the latest installer:
 
-https://your-domain.com/releases/AntiArchiveScanner-Setup.exe
+@https://github.com/Cobollt/AntiArchiveScanner/releases/latest/download/AntiArchiveScanner-Setup.exe
 
 Portable version:
 
-https://your-domain.com/releases/AntiArchiveScanner-portable.zip
+@https://your-domain.com/releases/AntiArchiveScanner-portable.zip
 
 ---
 
@@ -22,11 +22,11 @@ https://your-domain.com/releases/AntiArchiveScanner-portable.zip
 
 Download the latest installer:
 
-https://your-domain.com/releases/AntiArchiveScanner.dmg
+https://github.com/Cobollt/Automated-defender/tree/main/release/macos/AntiArchiveScanner.dmg
 
 Portable version:
 
-https://your-domain.com/releases/AntiArchiveScanner-portable.zip
+https://github.com/Cobollt/Automated-defender/tree/main/release/macos/AntiArchiveScanner-portable.zip
 
 ---
 
@@ -34,7 +34,7 @@ https://your-domain.com/releases/AntiArchiveScanner-portable.zip
 
 The application checks for updates using:
 
-https://your-domain.com/releases/update-manifest.json
+https://github.com/Cobollt/Automated-defender/tree/main/release/macos/update-manifest.json
 
 ---
 
