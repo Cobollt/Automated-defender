@@ -1,0 +1,10 @@
+Application: AntiArchiveScanner
+Version: 1.0.0
+Platform: windows
+Architecture: AMD64
+Python: 3.14.3
+Installer: AntiArchiveScanner-Setup.exe
+Installer SHA-256: 6ee2927202cbd55c8621a9e94c684bbb0513e84428ab0097b9d71e252834787e
+Portable: AntiArchiveScanner-portable.zip
+Portable SHA-256: 6ca63e0e2f1e6527aebc3d618a787796bc5c912d169a808eeaa09dddee824912
+Created: 2026-07-22T20:02:54.588742+00:00
