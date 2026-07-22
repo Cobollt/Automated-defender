@@ -22,11 +22,11 @@ Portable version:
 
 Download the latest installer:
 
-https://github.com/Cobollt/Automated-defender/tree/main/release/macos/AntiArchiveScanner.dmg
+https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/macos/AntiArchiveScanner.dmg
 
 Portable version:
 
-https://github.com/Cobollt/Automated-defender/tree/main/release/macos/AntiArchiveScanner-portable.zip
+https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/macos/AntiArchiveScanner-portable.zip
 
 ---
 
@@ -34,7 +34,7 @@ https://github.com/Cobollt/Automated-defender/tree/main/release/macos/AntiArchiv
 
 The application checks for updates using:
 
-https://github.com/Cobollt/Automated-defender/tree/main/release/macos/update-manifest.json
+https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/macos/update-manifest.json
 
 ---
 
