@@ -370,28 +370,30 @@ def test_process_file_runs_complete_pipeline(
         "FILE_READY_TIMEOUT",
         1,
     )
-
     monkeypatch.setattr(
         AppConfig,
         "FILE_READY_CHECK_INTERVAL",
         0.01,
     )
-
     monkeypatch.setattr(
         AppConfig,
         "FILE_STABLE_CHECKS_REQUIRED",
         1,
     )
 
-    file_path = tmp_path / "safe.txt"
-    file_path.write_text(
-        "safe",
-        encoding="utf-8",
+    file_path = tmp_path / "dangerous_file.exe"
+    file_path.write_bytes(
+        b"MZ dangerous test file"
     )
 
-    scanner = FakeScanner()
+    scanner = FakeScanner(
+        risk_level=RiskLevel.HIGH,
+        risk_score=75,
+    )
+
     notifier = FakeNotifier()
     reporting_service = FakeReportingService()
+
     completed_results: list[ScanResult] = []
 
     with ThreadPoolExecutor(
@@ -405,7 +407,9 @@ def test_process_file_runs_complete_pipeline(
             completed_results=completed_results,
         )
 
-        handler._process_file(file_path)
+        handler._process_file(
+            file_path.resolve()
+        )
 
     assert scanner.scanned_files == [
         file_path.resolve()
@@ -415,21 +419,25 @@ def test_process_file_runs_complete_pipeline(
         reporting_service.results
     ) == 1
 
-    assert len(notifier.results) == 1
-    assert len(completed_results) == 1
+    assert len(
+        notifier.results
+    ) == 1
 
-    scan_result = completed_results[0]
+    assert len(
+        completed_results
+    ) == 1
 
-    assert scan_result.target_path == (
+    result = completed_results[0]
+
+    assert result.target_path == (
         file_path.resolve()
     )
-    assert scan_result.target_sha256 == (
-        "test-sha256"
-    )
-    assert scan_result.status == (
-        ScanStatus.COMPLETED
+
+    assert result.risk_level == (
+        RiskLevel.HIGH
     )
 
+    assert result.risk_score == 75
 
 def test_same_file_is_not_scheduled_twice(
     tmp_path: Path,
