@@ -60,6 +60,143 @@ class FakeReportingService:
         return Path("report.json")
 
 
+class FakeScanner:
+    def __init__(
+        self,
+        risk_level: RiskLevel = RiskLevel.SAFE,
+        risk_score: int = 0,
+    ) -> None:
+        self.risk_level = risk_level
+        self.risk_score = risk_score
+        self.scanned_files: list[Path] = []
+
+    def scan(
+        self,
+        file_path: Path,
+    ) -> ScanResult:
+        self.scanned_files.append(file_path)
+
+        return ScanResult(
+            target_path=file_path,
+            target_sha256="test-sha256",
+            status=ScanStatus.COMPLETED,
+            risk_score=self.risk_score,
+            risk_level=self.risk_level,
+            total_files_checked=1,
+            total_threats_found=0,
+        )
+
+
+def test_safe_result_is_ignored_automatically(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        AppConfig,
+        "FILE_READY_TIMEOUT",
+        1,
+    )
+    monkeypatch.setattr(
+        AppConfig,
+        "FILE_READY_CHECK_INTERVAL",
+        0.01,
+    )
+    monkeypatch.setattr(
+        AppConfig,
+        "FILE_STABLE_CHECKS_REQUIRED",
+        1,
+    )
+
+    file_path = tmp_path / "safe.txt"
+    file_path.write_text(
+        "safe",
+        encoding="utf-8",
+    )
+
+    scanner = FakeScanner(
+        risk_level=RiskLevel.SAFE,
+        risk_score=0,
+    )
+    notifier = FakeNotifier()
+    reporting_service = FakeReportingService()
+    completed_results: list[ScanResult] = []
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        handler = create_handler(
+            executor=executor,
+            scanner=scanner,
+            notifier=notifier,
+            reporting_service=reporting_service,
+            completed_results=completed_results,
+        )
+
+        handler._process_file(
+            file_path.resolve()
+        )
+
+    assert scanner.scanned_files == [
+        file_path.resolve()
+    ]
+
+    assert len(reporting_service.results) == 1
+    assert notifier.results == []
+    assert completed_results == []
+
+
+def test_high_risk_result_sends_notification_and_opens_window(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        AppConfig,
+        "FILE_READY_TIMEOUT",
+        1,
+    )
+    monkeypatch.setattr(
+        AppConfig,
+        "FILE_READY_CHECK_INTERVAL",
+        0.01,
+    )
+    monkeypatch.setattr(
+        AppConfig,
+        "FILE_STABLE_CHECKS_REQUIRED",
+        1,
+    )
+
+    file_path = tmp_path / "danger.exe"
+    file_path.write_bytes(b"MZ test")
+
+    scanner = FakeScanner(
+        risk_level=RiskLevel.HIGH,
+        risk_score=70,
+    )
+    notifier = FakeNotifier()
+    reporting_service = FakeReportingService()
+    completed_results: list[ScanResult] = []
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        handler = create_handler(
+            executor=executor,
+            scanner=scanner,
+            notifier=notifier,
+            reporting_service=reporting_service,
+            completed_results=completed_results,
+        )
+
+        handler._process_file(
+            file_path.resolve()
+        )
+
+    assert len(reporting_service.results) == 1
+    assert len(notifier.results) == 1
+    assert len(completed_results) == 1
+
+    assert (
+        completed_results[0].risk_level
+        == RiskLevel.HIGH
+    )
+
+
 def create_handler(
     executor: ThreadPoolExecutor,
     scanner: FakeScanner | None = None,

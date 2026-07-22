@@ -7,6 +7,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 from collections.abc import Callable
 from application.reporting_service import ReportingService
+from domain.enums import RiskLevel
 
 from config import AppConfig
 from domain.interfaces import (
@@ -83,7 +84,6 @@ class DownloadsEventHandler(FileSystemEventHandler):
                 )
                 return
 
-            # Сканирование должно вызываться только один раз.
             result = self._scanner.scan(file_path)
 
             report_path = (
@@ -100,6 +100,21 @@ class DownloadsEventHandler(FileSystemEventHandler):
                 )
 
             self._print_result(result)
+
+            dangerous_levels = {
+                RiskLevel.HIGH,
+                RiskLevel.CRITICAL,
+            }
+
+            if result.risk_level not in dangerous_levels:
+                self._logger.info(
+                    "Scan result ignored automatically: "
+                    "file=%s risk_level=%s risk_score=%s",
+                    file_path,
+                    result.risk_level.value,
+                    result.risk_score,
+                )
+                return
 
             notification_sent = (
                 self._notifier.notify_scan_result(
@@ -123,7 +138,9 @@ class DownloadsEventHandler(FileSystemEventHandler):
 
         finally:
             with self._processing_lock:
-                self._processing_files.discard(file_path)
+                self._processing_files.discard(
+                    file_path
+                )
 
     def _should_ignore(self, file_path: Path) -> bool:
         if file_path.name.startswith("."):
