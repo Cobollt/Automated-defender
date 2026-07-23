@@ -10,11 +10,11 @@ Cross-platform application for automatic scanning of downloaded files and archiv
 
 Download the latest installer:
 
-@https://github.com/Cobollt/AntiArchiveScanner/releases/latest/download/AntiArchiveScanner-Setup.exe
+https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/windows/AntiArchiveScanner-Setup.exe
 
 Portable version:
 
-@https://your-domain.com/releases/AntiArchiveScanner-portable.zip
+https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/windows/AntiArchiveScanner-portable.zip
 
 ---
 

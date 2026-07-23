@@ -2,11 +2,11 @@
   "version": "1.0.0",
   "published_at": "2026-07-22T20:02:54.389850+00:00",
   "windows": {
-    "url": "https://example.com/releases/AntiArchiveScanner-Setup.exe",
+    "url": "https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/windows/AntiArchiveScanner-Setup.exe",
     "sha256": "6ee2927202cbd55c8621a9e94c684bbb0513e84428ab0097b9d71e252834787e"
   },
   "macos": {
-    "url": "https://example.com/releases/AntiArchiveScanner.dmg",
+    "url": "https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/macos/AntiArchiveScanner.dmg",
     "sha256": ""
   }
 }
