@@ -1,16 +1,35 @@
 #define AppName "AntiArchiveScanner"
-#define AppVersion "1.0.0"
+
+#ifndef AppVersion
+    #define AppVersion "1.0.0"
+#endif
+
 #define AppPublisher "AntiArchiveScanner"
+
 #define AppExeName "AntiArchiveScanner.exe"
-#define UpdaterExeName "Update.exe"
+
+#define UpdaterName "AntiArchiveScannerUpdater"
+#define UpdaterExeName "AntiArchiveScannerUpdater.exe"
 
 #define ProjectRoot "..\.."
+
 #define BuildSource ProjectRoot + "\dist\AntiArchiveScanner"
+
 #define UpdaterSource ProjectRoot + "\dist\AntiArchiveScannerUpdater"
+
 #define OutputDirectory ProjectRoot + "\release\windows"
 
+
 [Setup]
-; AppId нельзя менять между версиями — по нему определяется обновление.
+
+; ---------------------------------------------------------
+; Application identity
+; ---------------------------------------------------------
+
+; ВАЖНО:
+; AppId нельзя менять между версиями.
+; По нему Inno Setup определяет,
+; что новая установка является обновлением.
 AppId={{E6217503-E573-4D76-9E67-86FCBE117109}
 
 AppName={#AppName}
@@ -18,42 +37,85 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 
+VersionInfoVersion={#AppVersion}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductName={#AppName}
+VersionInfoCompany={#AppPublisher}
+
+; ---------------------------------------------------------
+; Installation
+; ---------------------------------------------------------
+
 DefaultDirName={localappdata}\Programs\{#AppName}
+
 DefaultGroupName={#AppName}
 
 UsePreviousAppDir=yes
+
 DirExistsWarning=no
 
 DisableProgramGroupPage=yes
+
 PrivilegesRequired=lowest
 
+PrivilegesRequiredOverridesAllowed=dialog
+
+; ---------------------------------------------------------
+; Output
+; ---------------------------------------------------------
+
 OutputDir={#OutputDirectory}
+
 OutputBaseFilename=AntiArchiveScanner-Setup
 
 Compression=lzma2
+
 SolidCompression=yes
+
 WizardStyle=modern
 
+; ---------------------------------------------------------
+; Architecture
+; ---------------------------------------------------------
+
 ArchitecturesAllowed=x64compatible
+
 ArchitecturesInstallIn64BitMode=x64compatible
 
+; ---------------------------------------------------------
+; Uninstall
+; ---------------------------------------------------------
+
 UninstallDisplayName={#AppName}
+
 UninstallDisplayIcon={app}\{#AppExeName}
 
+; ---------------------------------------------------------
+; Application handling
+; ---------------------------------------------------------
+
 SetupLogging=yes
+
 CloseApplications=yes
+
 RestartApplications=no
 
 #ifdef SetupIconFile
 SetupIconFile={#SetupIconFile}
 #endif
 
+
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+
+Name: "english"; \
+    MessagesFile: "compiler:Default.isl"
+
+Name: "russian"; \
+    MessagesFile: "compiler:Languages\Russian.isl"
+
 
 [Tasks]
-; Галочка включена по умолчанию.
+
 Name: "desktopicon"; \
     Description: "Создать значок AntiArchiveScanner на рабочем столе"; \
     GroupDescription: "Ярлыки:"
@@ -63,36 +125,82 @@ Name: "autostart"; \
     GroupDescription: "Автоматический запуск:"; \
     Flags: unchecked
 
+
+[InstallDelete]
+
+; ---------------------------------------------------------
+; Cleanup from old installer layouts
+; ---------------------------------------------------------
+
+; Старое имя updater из предыдущей версии проекта.
+Type: files; \
+    Name: "{app}\Updater\Update.exe"
+
+; Старые spec/runtime-файлы не должны попадать
+; между версиями в установленное приложение.
+Type: files; \
+    Name: "{app}\*.spec"
+
+
 [Files]
-; Основная программа вместе с каталогом _internal.
+
+; ---------------------------------------------------------
+; Main application
+; ---------------------------------------------------------
+
+; PyInstaller используется в режиме --onedir.
+; Поэтому необходимо копировать не только EXE,
+; но и весь каталог вместе с _internal.
 Source: "{#BuildSource}\*"; \
     DestDir: "{app}"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Отдельная программа обновления.
+
+; ---------------------------------------------------------
+; Updater
+; ---------------------------------------------------------
+
 Source: "{#UpdaterSource}\*"; \
     DestDir: "{app}\Updater"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
+
 [Icons]
-; Главное меню «Пуск».
+
+; ---------------------------------------------------------
+; Start menu
+; ---------------------------------------------------------
+
 Name: "{autoprograms}\{#AppName}"; \
     Filename: "{app}\{#AppExeName}"; \
     WorkingDir: "{app}"
 
-; Ярлык программы обновления.
+
+; ---------------------------------------------------------
+; Update shortcut
+; ---------------------------------------------------------
+
 Name: "{autoprograms}\{#AppName}\Проверить обновления"; \
     Filename: "{app}\Updater\{#UpdaterExeName}"; \
     WorkingDir: "{app}\Updater"
 
-; Ярлык на рабочем столе.
+
+; ---------------------------------------------------------
+; Desktop
+; ---------------------------------------------------------
+
 Name: "{autodesktop}\{#AppName}"; \
     Filename: "{app}\{#AppExeName}"; \
     WorkingDir: "{app}"; \
     Tasks: desktopicon
 
+
 [Registry]
-; Автозапуск — только если пользователь выбрал соответствующую задачу.
+
+; ---------------------------------------------------------
+; Autostart
+; ---------------------------------------------------------
+
 Root: HKCU; \
     Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
     ValueType: string; \
@@ -101,7 +209,11 @@ Root: HKCU; \
     Tasks: autostart; \
     Flags: uninsdeletevalue
 
-; Текущая установленная версия доступна Update.exe.
+
+; ---------------------------------------------------------
+; Application metadata
+; ---------------------------------------------------------
+
 Root: HKCU; \
     Subkey: "Software\AntiArchiveScanner"; \
     ValueType: string; \
@@ -116,65 +228,96 @@ Root: HKCU; \
     ValueData: "{#AppVersion}"; \
     Flags: uninsdeletekey
 
+
 [Run]
-; Inno Setup автоматически покажет эту запись как галочку
-; на финальной странице установки.
+
+; На финальной странице установки пользователь
+; сможет оставить включённой галочку запуска.
 Filename: "{app}\{#AppExeName}"; \
     Description: "Запустить {#AppName}"; \
     WorkingDir: "{app}"; \
     Flags: nowait postinstall skipifsilent runascurrentuser
 
+
 [UninstallRun]
+
+; При удалении приложения пытаемся завершить
+; основной процесс.
 Filename: "taskkill.exe"; \
     Parameters: "/F /IM {#AppExeName}"; \
     Flags: runhidden skipifdoesntexist
 
+; И updater.
 Filename: "taskkill.exe"; \
     Parameters: "/F /IM {#UpdaterExeName}"; \
     Flags: runhidden skipifdoesntexist
+
 
 [Code]
 
 function IsUpgrade(): Boolean;
 begin
-  Result := RegKeyExists(
-    HKEY_CURRENT_USER,
-    'Software\Microsoft\Windows\CurrentVersion\Uninstall\' +
-    ExpandConstant('{#SetupSetting("AppId")}_is1')
+  Result :=
+    RegKeyExists(
+      HKEY_CURRENT_USER,
+      'Software\Microsoft\Windows\CurrentVersion\Uninstall\' +
+      ExpandConstant(
+        '{#SetupSetting("AppId")}_is1'
+      )
+    );
+end;
+
+
+procedure StopApplication(
+  ProcessName: String
+);
+var
+  ResultCode: Integer;
+begin
+
+  Exec(
+    'taskkill.exe',
+    '/F /IM "' + ProcessName + '"',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
   );
+
 end;
 
 
 procedure StopRunningApplication();
-var
-  ResultCode: Integer;
 begin
-  Exec(
-    'taskkill.exe',
-    '/F /IM "{#AppExeName}"',
-    '',
-    SW_HIDE,
-    ewWaitUntilTerminated,
-    ResultCode
+
+  StopApplication(
+    '{#AppExeName}'
   );
 
-  Exec(
-    'taskkill.exe',
-    '/F /IM "{#UpdaterExeName}"',
-    '',
-    SW_HIDE,
-    ewWaitUntilTerminated,
-    ResultCode
+  StopApplication(
+    '{#UpdaterExeName}'
   );
+
+  ; Поддержка старого имени updater.
+  StopApplication(
+    'Update.exe'
+  );
+
 end;
 
 
-procedure CurStepChanged(CurStep: TSetupStep);
+procedure CurStepChanged(
+  CurStep: TSetupStep
+);
 begin
+
   if CurStep = ssInstall then
   begin
+
     StopRunningApplication();
+
   end;
+
 end;
 
 
@@ -182,8 +325,12 @@ procedure CurUninstallStepChanged(
   CurUninstallStep: TUninstallStep
 );
 begin
+
   if CurUninstallStep = usUninstall then
   begin
+
     StopRunningApplication();
+
   end;
+
 end;

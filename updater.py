@@ -1,374 +1,111 @@
-import hashlib
-import json
+import argparse
 import os
 import platform
 import shutil
 import subprocess
-import sys
 import tempfile
+import time
 import tkinter as tk
-import urllib.error
-import urllib.request
 from pathlib import Path
 from tkinter import messagebox
-from typing import Any
 
-
-APP_NAME = "AntiArchiveScanner"
-CURRENT_VERSION = "1.0.0"
-
-UPDATE_MANIFEST_URL = (
-    "https://github.com/Cobollt/Automated-defender.git"
-    "update-manifest.json"
+from infrastructure.update import (
+    APP_NAME,
+    UPDATE_MANIFEST_URL,
+    UpdateClient,
+    UpdateError,
+    UpdateManifest,
+    detect_installed_version,
+    is_newer_version,
 )
 
-DOWNLOAD_TIMEOUT_SECONDS = 60
-BUFFER_SIZE = 1024 * 1024
+
+PROCESS_WAIT_TIMEOUT_SECONDS = 30.0
+PROCESS_WAIT_INTERVAL_SECONDS = 0.5
 
 
-class UpdateError(Exception):
-    pass
-
-
-class Version:
-    def __init__(self, value: str) -> None:
-        normalized = value.strip().lstrip("v")
-
-        if not normalized:
-            raise ValueError("Пустая версия.")
-
-        try:
-            self.parts = tuple(
-                int(part)
-                for part in normalized.split(".")
-            )
-        except ValueError as error:
-            raise ValueError(
-                f"Некорректная версия: {value}"
-            ) from error
-
-    def __lt__(self, other: "Version") -> bool:
-        length = max(
-            len(self.parts),
-            len(other.parts),
+def parse_arguments(
+) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "AntiArchiveScanner updater"
         )
-
-        left = self.parts + (0,) * (
-            length - len(self.parts)
-        )
-
-        right = other.parts + (0,) * (
-            length - len(other.parts)
-        )
-
-        return left < right
-
-
-class UpdateManifest:
-    def __init__(
-        self,
-        data: dict[str, Any],
-    ) -> None:
-        self.version = str(
-            data.get("version", "")
-        ).strip()
-
-        if not self.version:
-            raise UpdateError(
-                "В манифесте отсутствует версия."
-            )
-
-        platform_key = self._platform_key()
-
-        platform_data = data.get(
-            platform_key
-        )
-
-        if not isinstance(
-            platform_data,
-            dict,
-        ):
-            raise UpdateError(
-                "В манифесте отсутствует "
-                f"секция для {platform_key}."
-            )
-
-        self.download_url = str(
-            platform_data.get("url", "")
-        ).strip()
-
-        self.sha256 = str(
-            platform_data.get("sha256", "")
-        ).strip().lower()
-
-        if not self.download_url:
-            raise UpdateError(
-                "В манифесте отсутствует URL обновления."
-            )
-
-        if len(self.sha256) != 64:
-            raise UpdateError(
-                "В манифесте указан некорректный SHA-256."
-            )
-
-    @staticmethod
-    def _platform_key() -> str:
-        system_name = platform.system()
-
-        if system_name == "Windows":
-            return "windows"
-
-        if system_name == "Darwin":
-            return "macos"
-
-        raise UpdateError(
-            "Обновление поддерживается только "
-            "на Windows и macOS."
-        )
-
-
-class UpdateClient:
-    def __init__(
-        self,
-        manifest_url: str,
-    ) -> None:
-        self._manifest_url = manifest_url
-
-    def fetch_manifest(
-        self,
-    ) -> UpdateManifest:
-        try:
-            with urllib.request.urlopen(
-                self._manifest_url,
-                timeout=DOWNLOAD_TIMEOUT_SECONDS,
-            ) as response:
-                raw_data = response.read()
-
-        except (
-            urllib.error.URLError,
-            TimeoutError,
-            OSError,
-        ) as error:
-            raise UpdateError(
-                "Не удалось загрузить "
-                f"манифест обновления: {error}"
-            ) from error
-
-        try:
-            data = json.loads(
-                raw_data.decode("utf-8")
-            )
-
-        except (
-            UnicodeDecodeError,
-            json.JSONDecodeError,
-        ) as error:
-            raise UpdateError(
-                "Манифест обновления повреждён."
-            ) from error
-
-        if not isinstance(data, dict):
-            raise UpdateError(
-                "Манифест имеет некорректный формат."
-            )
-
-        return UpdateManifest(data)
-
-    def download_update(
-        self,
-        manifest: UpdateManifest,
-        destination: Path,
-    ) -> None:
-        try:
-            with urllib.request.urlopen(
-                manifest.download_url,
-                timeout=DOWNLOAD_TIMEOUT_SECONDS,
-            ) as response:
-                with destination.open(
-                    "wb"
-                ) as output_file:
-                    while True:
-                        chunk = response.read(
-                            BUFFER_SIZE
-                        )
-
-                        if not chunk:
-                            break
-
-                        output_file.write(chunk)
-
-        except (
-            urllib.error.URLError,
-            TimeoutError,
-            OSError,
-        ) as error:
-            raise UpdateError(
-                "Не удалось загрузить обновление: "
-                f"{error}"
-            ) from error
-
-        actual_sha256 = calculate_sha256(
-            destination
-        )
-
-        if actual_sha256 != manifest.sha256:
-            destination.unlink(
-                missing_ok=True
-            )
-
-            raise UpdateError(
-                "SHA-256 обновления не совпадает. "
-                "Файл удалён."
-            )
-
-
-def calculate_sha256(
-    file_path: Path,
-) -> str:
-    sha256 = hashlib.sha256()
-
-    with file_path.open("rb") as file:
-        while True:
-            chunk = file.read(
-                BUFFER_SIZE
-            )
-
-            if not chunk:
-                break
-
-            sha256.update(chunk)
-
-    return sha256.hexdigest()
-
-
-def is_update_available(
-    remote_version: str,
-) -> bool:
-    try:
-        current = Version(
-            CURRENT_VERSION
-        )
-        remote = Version(
-            remote_version
-        )
-
-    except ValueError as error:
-        raise UpdateError(
-            str(error)
-        ) from error
-
-    return current < remote
-
-
-def stop_main_application() -> None:
-    system_name = platform.system()
-
-    if system_name == "Windows":
-        subprocess.run(
-            [
-                "taskkill.exe",
-                "/F",
-                "/IM",
-                f"{APP_NAME}.exe",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            creationflags=getattr(
-                subprocess,
-                "CREATE_NO_WINDOW",
-                0,
-            ),
-        )
-
-        return
-
-    if system_name == "Darwin":
-        subprocess.run(
-            [
-                "pkill",
-                "-x",
-                APP_NAME,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        return
-
-    raise UpdateError(
-        "Остановка приложения "
-        "не поддерживается на этой ОС."
     )
 
-
-def launch_windows_installer(
-    installer_path: Path,
-) -> None:
-    stop_main_application()
-
-    subprocess.Popen(
-        [
-            str(installer_path),
-            "/SILENT",
-            "/CLOSEAPPLICATIONS",
-            "/RESTARTAPPLICATIONS",
-        ],
-        cwd=installer_path.parent,
-        creationflags=getattr(
-            subprocess,
-            "DETACHED_PROCESS",
-            0,
-        )
-        | getattr(
-            subprocess,
-            "CREATE_NEW_PROCESS_GROUP",
-            0,
+    parser.add_argument(
+        "--pid",
+        type=int,
+        default=None,
+        help=(
+            "PID основного приложения, "
+            "завершения которого нужно "
+            "дождаться перед установкой."
         ),
     )
 
+    return parser.parse_args()
 
-def launch_macos_installer(
-    dmg_path: Path,
+
+def process_exists(
+    pid: int,
+) -> bool:
+    if pid <= 0:
+        return False
+
+    try:
+        os.kill(
+            pid,
+            0,
+        )
+
+    except ProcessLookupError:
+        return False
+
+    except PermissionError:
+        return True
+
+    except OSError:
+        return False
+
+    return True
+
+
+def wait_for_process_exit(
+    pid: int,
+    timeout_seconds: float = (
+        PROCESS_WAIT_TIMEOUT_SECONDS
+    ),
 ) -> None:
-    stop_main_application()
-
-    subprocess.Popen(
-        [
-            "open",
-            str(dmg_path),
-        ],
-        cwd=dmg_path.parent,
-        start_new_session=True,
+    deadline = (
+        time.monotonic()
+        + timeout_seconds
     )
 
+    while (
+        time.monotonic()
+        < deadline
+    ):
+        if not process_exists(
+            pid
+        ):
+            return
 
-def launch_installer(
-    update_path: Path,
-) -> None:
-    system_name = platform.system()
-
-    if system_name == "Windows":
-        launch_windows_installer(
-            update_path
+        time.sleep(
+            PROCESS_WAIT_INTERVAL_SECONDS
         )
-        return
-
-    if system_name == "Darwin":
-        launch_macos_installer(
-            update_path
-        )
-        return
 
     raise UpdateError(
-        "Установка обновлений "
-        "не поддерживается на этой ОС."
+        "Основное приложение "
+        "не завершилось "
+        "в установленное время."
     )
 
 
-def update_file_suffix() -> str:
-    system_name = platform.system()
+def update_file_suffix(
+) -> str:
+    system_name = (
+        platform.system()
+    )
 
     if system_name == "Windows":
         return ".exe"
@@ -378,12 +115,134 @@ def update_file_suffix() -> str:
 
     raise UpdateError(
         "Обновление не поддерживается "
+        "на этой операционной системе."
+    )
+
+
+def installer_filename(
+    manifest: UpdateManifest,
+) -> str:
+    return (
+        f"{APP_NAME}-"
+        f"{manifest.version}"
+        f"{update_file_suffix()}"
+    )
+
+
+def prepare_download_directory(
+    version: str,
+) -> Path:
+    update_root = (
+        Path(
+            tempfile.gettempdir()
+        )
+        / APP_NAME
+        / "updates"
+    )
+
+    update_directory = (
+        update_root
+        / version
+    )
+
+    if update_directory.exists():
+        shutil.rmtree(
+            update_directory,
+            ignore_errors=True,
+        )
+
+    update_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    return update_directory
+
+
+def launch_windows_installer(
+    installer_path: Path,
+) -> None:
+    subprocess.Popen(
+        [
+            str(
+                installer_path
+            ),
+            "/SILENT",
+            "/CLOSEAPPLICATIONS",
+        ],
+        cwd=installer_path.parent,
+        creationflags=(
+            getattr(
+                subprocess,
+                "DETACHED_PROCESS",
+                0,
+            )
+            |
+            getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0,
+            )
+        ),
+        close_fds=True,
+    )
+
+
+def launch_macos_installer(
+    dmg_path: Path,
+) -> None:
+    subprocess.Popen(
+        [
+            "open",
+            str(
+                dmg_path
+            ),
+        ],
+        cwd=dmg_path.parent,
+        start_new_session=True,
+        close_fds=True,
+    )
+
+
+def launch_installer(
+    update_path: Path,
+) -> None:
+    system_name = (
+        platform.system()
+    )
+
+    if system_name == "Windows":
+        launch_windows_installer(
+            update_path
+        )
+
+        return
+
+    if system_name == "Darwin":
+        launch_macos_installer(
+            update_path
+        )
+
+        return
+
+    raise UpdateError(
+        "Установка обновлений "
+        "не поддерживается "
         "на этой ОС."
     )
 
 
 class UpdaterWindow:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        application_pid: (
+            int | None
+        ) = None,
+    ) -> None:
+        self._application_pid = (
+            application_pid
+        )
+
         self._root = tk.Tk()
         self._root.withdraw()
 
@@ -391,122 +250,223 @@ class UpdaterWindow:
             UPDATE_MANIFEST_URL
         )
 
-    def run(self) -> int:
+        self._current_version = (
+            detect_installed_version()
+        )
+
+    def run(
+        self,
+    ) -> int:
         try:
             manifest = (
-                self._client.fetch_manifest()
+                self._client
+                .fetch_manifest()
             )
 
-            if not is_update_available(
-                manifest.version
+            platform_update = (
+                manifest
+                .platform_update()
+            )
+
+            if not is_newer_version(
+                current_version=(
+                    self._current_version
+                ),
+                remote_version=(
+                    manifest.version
+                ),
             ):
                 messagebox.showinfo(
-                    title=f"{APP_NAME} Update",
-                    message=(
-                        "Установлена актуальная версия.\n\n"
-                        f"Текущая версия: {CURRENT_VERSION}"
+                    title=(
+                        f"{APP_NAME} Update"
                     ),
+                    message=(
+                        "Установлена "
+                        "актуальная версия."
+                        "\n\n"
+                        "Текущая версия: "
+                        f"{self._current_version}"
+                    ),
+                    parent=self._root,
                 )
 
                 return 0
 
-            confirmed = messagebox.askyesno(
-                title=f"{APP_NAME} Update",
-                message=(
-                    "Доступно обновление.\n\n"
-                    f"Текущая версия: {CURRENT_VERSION}\n"
-                    f"Новая версия: {manifest.version}\n\n"
-                    "Загрузить и установить обновление?"
-                ),
+            confirmed = (
+                messagebox.askyesno(
+                    title=(
+                        f"{APP_NAME} Update"
+                    ),
+                    message=(
+                        "Доступно обновление."
+                        "\n\n"
+                        "Текущая версия: "
+                        f"{self._current_version}"
+                        "\n"
+                        "Новая версия: "
+                        f"{manifest.version}"
+                        "\n\n"
+                        "Загрузить обновление?"
+                    ),
+                    parent=self._root,
+                )
             )
 
             if not confirmed:
                 return 0
 
-            update_path = self._download(
-                manifest
+            update_path = (
+                self._download(
+                    manifest=manifest,
+                    download_url=(
+                        platform_update.url
+                    ),
+                    sha256=(
+                        platform_update.sha256
+                    ),
+                )
             )
 
             install_confirmed = (
                 messagebox.askyesno(
-                    title=f"{APP_NAME} Update",
+                    title=(
+                        f"{APP_NAME} Update"
+                    ),
                     message=(
-                        "Обновление загружено и проверено.\n\n"
-                        "Основное приложение будет закрыто.\n"
+                        "Обновление загружено "
+                        "и прошло проверку "
+                        "SHA-256."
+                        "\n\n"
                         "Начать установку?"
                     ),
+                    parent=self._root,
                 )
             )
 
             if not install_confirmed:
                 return 0
 
+            self._wait_for_application()
+
             launch_installer(
                 update_path
             )
 
             messagebox.showinfo(
-                title=f"{APP_NAME} Update",
-                message=(
-                    "Установщик обновления запущен.\n"
-                    "Программа обновления будет закрыта."
+                title=(
+                    f"{APP_NAME} Update"
                 ),
+                message=(
+                    "Установщик обновления "
+                    "запущен."
+                ),
+                parent=self._root,
             )
 
             return 0
 
         except UpdateError as error:
             messagebox.showerror(
-                title=f"{APP_NAME} Update",
-                message=str(error),
+                title=(
+                    f"{APP_NAME} Update"
+                ),
+                message=str(
+                    error
+                ),
+                parent=self._root,
+            )
+
+            return 1
+
+        except Exception as error:
+            messagebox.showerror(
+                title=(
+                    f"{APP_NAME} Update"
+                ),
+                message=(
+                    "Непредвиденная ошибка "
+                    "обновления: "
+                    f"{error}"
+                ),
+                parent=self._root,
             )
 
             return 1
 
         finally:
-            self._root.destroy()
+            try:
+                self._root.destroy()
+
+            except tk.TclError:
+                pass
 
     def _download(
         self,
         manifest: UpdateManifest,
+        download_url: str,
+        sha256: str,
     ) -> Path:
-        suffix = update_file_suffix()
-
-        download_dir = (
-            Path(tempfile.gettempdir())
-            / APP_NAME
-            / "updates"
-            / manifest.version
-        )
-
-        if download_dir.exists():
-            shutil.rmtree(
-                download_dir,
-                ignore_errors=True,
+        download_directory = (
+            prepare_download_directory(
+                manifest.version
             )
-
-        download_dir.mkdir(
-            parents=True,
-            exist_ok=True,
         )
 
         update_path = (
-            download_dir
-            / f"{APP_NAME}-Update{suffix}"
+            download_directory
+            / installer_filename(
+                manifest
+            )
         )
 
         self._client.download_update(
-            manifest=manifest,
+            url=download_url,
+            expected_sha256=sha256,
             destination=update_path,
         )
 
         return update_path
 
+    def _wait_for_application(
+        self,
+    ) -> None:
+        if (
+            self._application_pid
+            is None
+        ):
+            return
 
-def main() -> int:
-    updater = UpdaterWindow()
+        if (
+            self._application_pid
+            == os.getpid()
+        ):
+            raise UpdateError(
+                "Updater получил "
+                "собственный PID вместо "
+                "PID основной программы."
+            )
+
+        wait_for_process_exit(
+            self._application_pid
+        )
+
+
+def main(
+) -> int:
+    arguments = (
+        parse_arguments()
+    )
+
+    updater = UpdaterWindow(
+        application_pid=(
+            arguments.pid
+        )
+    )
+
     return updater.run()
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(
+        main()
+    )

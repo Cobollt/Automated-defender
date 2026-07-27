@@ -1,3 +1,5 @@
+import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -7,7 +9,9 @@ from config import AppConfig
 class ApplicationCommandBuilder:
     @staticmethod
     def executable_path() -> Path:
-        return Path(sys.executable).resolve()
+        return Path(
+            sys.executable
+        ).resolve()
 
     @staticmethod
     def source_entry_path() -> Path:
@@ -17,22 +21,31 @@ class ApplicationCommandBuilder:
         ).resolve()
 
     @classmethod
-    def build_arguments(cls) -> list[str]:
+    def build_arguments(
+        cls,
+    ) -> list[str]:
         if AppConfig.is_frozen():
             return [
-                str(cls.executable_path())
+                str(
+                    cls.executable_path()
+                )
             ]
 
         return [
-            str(cls.executable_path()),
-            str(cls.source_entry_path()),
+            str(
+                cls.executable_path()
+            ),
+            str(
+                cls.source_entry_path()
+            ),
         ]
 
     @classmethod
-    def build_windows_command(cls) -> str:
-        return " ".join(
-            cls._quote_windows_argument(argument)
-            for argument in cls.build_arguments()
+    def build_windows_command(
+        cls,
+    ) -> str:
+        return subprocess_list2cmdline(
+            cls.build_arguments()
         )
 
     @classmethod
@@ -42,19 +55,49 @@ class ApplicationCommandBuilder:
         return cls.build_arguments()
 
     @classmethod
-    def working_directory(cls) -> Path:
+    def working_directory(
+        cls,
+    ) -> Path:
         if AppConfig.is_frozen():
-            return cls.executable_path().parent
+            return (
+                cls.executable_path()
+                .parent
+            )
 
-        return AppConfig.SOURCE_DIR.resolve()
-
-    @staticmethod
-    def _quote_windows_argument(
-        argument: str,
-    ) -> str:
-        escaped_argument = argument.replace(
-            '"',
-            '\\"',
+        return (
+            AppConfig.SOURCE_DIR
+            .resolve()
         )
 
-        return f'"{escaped_argument}"'
+    @classmethod
+    def display_command(
+        cls,
+    ) -> str:
+        if os.name == "nt":
+            return (
+                cls.build_windows_command()
+            )
+
+        return " ".join(
+            shlex.quote(
+                argument
+            )
+            for argument
+            in cls.build_arguments()
+        )
+
+
+def subprocess_list2cmdline(
+    arguments: list[str],
+) -> str:
+    """
+    Формирует Windows command line
+    по тем же правилам, которые использует
+    subprocess.list2cmdline(), но без
+    необходимости запускать процесс.
+    """
+    import subprocess
+
+    return subprocess.list2cmdline(
+        arguments
+    )

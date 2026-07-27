@@ -1,0 +1,138 @@
+# =========================================================
+# Python
+# =========================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+*.so
+*.pyd
+
+
+# =========================================================
+# Virtual environments
+# =========================================================
+
+.venv/
+venv/
+env/
+ENV/
+
+
+# =========================================================
+# Pytest / coverage
+# =========================================================
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+.pyre/
+.mypy_cache/
+.ruff_cache/
+
+
+# =========================================================
+# IDE
+# =========================================================
+
+.idea/
+.vscode/
+
+*.iml
+
+
+# =========================================================
+# macOS
+# =========================================================
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+._*
+
+
+# =========================================================
+# Windows
+# =========================================================
+
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+$RECYCLE.BIN/
+
+
+# =========================================================
+# PyInstaller
+# =========================================================
+
+build/
+dist/
+
+*.spec
+
+
+# =========================================================
+# Temporary files
+# =========================================================
+
+*.tmp
+*.temp
+*.part
+
+*.log
+
+*.bak
+*.backup
+*.old
+
+*~
+
+.cache/
+
+
+# =========================================================
+# Application runtime files
+# =========================================================
+
+application.lock
+
+logs/
+
+reports/
+
+quarantine/
+
+temp/
+
+
+# =========================================================
+# Packaging temporary directories
+# =========================================================
+
+installer/tmp/
+installer/temp/
+
+dmg-temp/
+package-temp/
+
+
+# =========================================================
+# IMPORTANT
+#
+# release/ is intentionally NOT ignored.
+#
+# The project currently distributes installers directly
+# through raw.githubusercontent.com instead of GitHub
+# Releases, therefore the following files must be committed:
+#
+# release/update-manifest.json
+# release/windows/AntiArchiveScanner-Setup.exe
+# release/macos/AntiArchiveScanner.dmg
+# =========================================================

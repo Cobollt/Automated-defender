@@ -24,30 +24,62 @@ class ReportingService:
         self,
         result: ScanResult,
     ) -> Path | None:
-        report_path = self._report_writer.write_scan_report(
-            result
-        )
+        report_path: Path | None = None
 
-        history_saved = self._history_storage.save_scan(
-            result=result,
-            report_path=report_path,
-        )
+        try:
+            report_path = (
+                self._report_writer
+                .write_scan_report(
+                    result
+                )
+            )
+
+        except Exception:
+            self._logger.exception(
+                "Unexpected error while "
+                "writing scan report for: %s",
+                result.target_path,
+            )
+
+        try:
+            history_saved = (
+                self._history_storage
+                .save_scan(
+                    result=result,
+                    report_path=(
+                        report_path
+                    ),
+                )
+            )
+
+        except Exception:
+            self._logger.exception(
+                "Unexpected error while "
+                "writing scan history for: %s",
+                result.target_path,
+            )
+
+            history_saved = False
 
         if report_path is None:
             self._logger.warning(
-                "Scan report was not created for: %s",
+                "Scan report was not "
+                "created for: %s",
                 result.target_path,
             )
+
         else:
             self._logger.info(
-                "Scan report saved for %s: %s",
+                "Scan report saved "
+                "for %s: %s",
                 result.target_path,
                 report_path,
             )
 
         if not history_saved:
             self._logger.warning(
-                "Scan history was not saved for: %s",
+                "Scan history was not "
+                "saved for: %s",
                 result.target_path,
             )
 
@@ -56,17 +88,36 @@ class ReportingService:
     def save_action_result(
         self,
         result: ActionResult,
-        quarantine_result: QuarantineResult | None = None,
+        quarantine_result: (
+            QuarantineResult | None
+        ) = None,
     ) -> bool:
         effective_quarantine_result = (
             quarantine_result
             or result.quarantine_result
         )
 
-        saved = self._history_storage.save_action(
-            result=result,
-            quarantine_result=effective_quarantine_result,
-        )
+        try:
+            saved = (
+                self._history_storage
+                .save_action(
+                    result=result,
+                    quarantine_result=(
+                        effective_quarantine_result
+                    ),
+                )
+            )
+
+        except Exception:
+            self._logger.exception(
+                "Unexpected error while "
+                "writing action history: "
+                "action=%s file=%s",
+                result.action.value,
+                result.file_path,
+            )
+
+            return False
 
         if saved:
             self._logger.info(
@@ -76,10 +127,11 @@ class ReportingService:
                 result.file_path,
                 result.success,
             )
+
         else:
             self._logger.warning(
-                "Action history was not saved: "
-                "action=%s file=%s",
+                "Action history was not "
+                "saved: action=%s file=%s",
                 result.action.value,
                 result.file_path,
             )

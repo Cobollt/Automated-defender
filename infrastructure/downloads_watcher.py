@@ -1,15 +1,15 @@
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
-from collections.abc import Callable
-from application.reporting_service import ReportingService
-from domain.enums import RiskLevel
 
+from application.reporting_service import ReportingService
 from config import AppConfig
+from domain.enums import RiskLevel
 from domain.interfaces import (
     FileWatcherInterface,
     NotifierInterface,
@@ -17,6 +17,12 @@ from domain.interfaces import (
 )
 from domain.models import ScanResult
 from utils.logger import setup_logger
+
+
+DANGEROUS_RISK_LEVELS = {
+    RiskLevel.HIGH,
+    RiskLevel.CRITICAL,
+}
 
 
 class DownloadsEventHandler(FileSystemEventHandler):
@@ -48,46 +54,112 @@ class DownloadsEventHandler(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        destination_path = getattr(event, "dest_path", None)
+        destination_path = getattr(
+            event,
+            "dest_path",
+            None,
+        )
 
         if destination_path:
-            self._schedule_file(Path(destination_path))
+            self._schedule_file(
+                Path(destination_path)
+            )
 
-    def _schedule_file(self, file_path: Path) -> None:
-        file_path = file_path.resolve()
+    def _schedule_file(
+        self,
+        file_path: Path,
+    ) -> None:
+        normalized_path = file_path.resolve()
 
-        if self._should_ignore(file_path):
+        if self._should_ignore(
+            normalized_path
+        ):
             return
 
+        if not self._try_mark_as_processing(
+            normalized_path
+        ):
+            self._logger.debug(
+                "File is already scheduled for scanning: %s",
+                normalized_path,
+            )
+            return
+
+        try:
+            self._executor.submit(
+                self._process_file,
+                normalized_path,
+            )
+
+        except Exception:
+            self._release_processing_file(
+                normalized_path
+            )
+            raise
+
+    def _try_mark_as_processing(
+        self,
+        file_path: Path,
+    ) -> bool:
+        normalized_path = file_path.resolve()
+
         with self._processing_lock:
-            if file_path in self._processing_files:
-                return
+            if (
+                normalized_path
+                in self._processing_files
+            ):
+                return False
 
-            self._processing_files.add(file_path)
+            self._processing_files.add(
+                normalized_path
+            )
 
-        self._executor.submit(self._process_file, file_path)
+            return True
+
+    def _release_processing_file(
+        self,
+        file_path: Path,
+    ) -> None:
+        normalized_path = file_path.resolve()
+
+        with self._processing_lock:
+            self._processing_files.discard(
+                normalized_path
+            )
 
     def _process_file(
-            self,
-            file_path: Path,
+        self,
+        file_path: Path,
     ) -> None:
+        normalized_path = file_path.resolve()
+
         try:
             self._logger.info(
                 "Detected new file: %s",
-                file_path,
+                normalized_path,
             )
 
-            if not self._wait_until_file_ready(file_path):
+            if self._should_ignore(
+                normalized_path
+            ):
+                return
+
+            if not self._wait_until_file_ready(
+                normalized_path
+            ):
                 self._logger.warning(
                     "File did not become ready: %s",
-                    file_path,
+                    normalized_path,
                 )
                 return
 
-            result = self._scanner.scan(file_path)
+            result = self._scanner.scan(
+                normalized_path
+            )
 
             report_path = (
-                self._reporting_service.save_scan_result(
+                self._reporting_service
+                .save_scan_result(
                     result
                 )
             )
@@ -95,29 +167,30 @@ class DownloadsEventHandler(FileSystemEventHandler):
             if report_path is not None:
                 self._logger.info(
                     "Report saved for %s: %s",
-                    file_path,
+                    normalized_path,
                     report_path,
                 )
 
-            self._print_result(result)
+            self._print_result(
+                result
+            )
 
-            dangerous_levels = {
-                RiskLevel.HIGH,
-                RiskLevel.CRITICAL,
-            }
-
-            if result.risk_level not in dangerous_levels:
+            if (
+                result.risk_level
+                not in DANGEROUS_RISK_LEVELS
+            ):
                 self._logger.info(
-                    "Scan result ignored automatically: "
+                    "Scan completed without user action: "
                     "file=%s risk_level=%s risk_score=%s",
-                    file_path,
+                    normalized_path,
                     result.risk_level.value,
                     result.risk_score,
                 )
                 return
 
             notification_sent = (
-                self._notifier.notify_scan_result(
+                self._notifier
+                .notify_scan_result(
                     result
                 )
             )
@@ -125,31 +198,41 @@ class DownloadsEventHandler(FileSystemEventHandler):
             if not notification_sent:
                 self._logger.warning(
                     "System notification was not delivered for: %s",
-                    file_path,
+                    normalized_path,
                 )
 
-            self._on_scan_completed(result)
+            self._on_scan_completed(
+                result
+            )
 
         except Exception:
             self._logger.exception(
                 "Unexpected error while processing file: %s",
-                file_path,
+                normalized_path,
             )
 
         finally:
-            with self._processing_lock:
-                self._processing_files.discard(
-                    file_path
-                )
+            self._release_processing_file(
+                normalized_path
+            )
 
-    def _should_ignore(self, file_path: Path) -> bool:
+    def _should_ignore(
+        self,
+        file_path: Path,
+    ) -> bool:
         if file_path.name.startswith("."):
             return True
 
-        return file_path.suffix.lower() in AppConfig.TEMP_DOWNLOAD_EXTENSIONS
+        return (
+            file_path.suffix.lower()
+            in AppConfig.TEMP_DOWNLOAD_EXTENSIONS
+        )
 
-    def _wait_until_file_ready(self, file_path: Path) -> bool:
-        previous_size = -1
+    def _wait_until_file_ready(
+        self,
+        file_path: Path,
+    ) -> bool:
+        previous_size: int | None = None
         stable_checks = 0
 
         deadline = (
@@ -157,93 +240,163 @@ class DownloadsEventHandler(FileSystemEventHandler):
             + AppConfig.FILE_READY_TIMEOUT
         )
 
-        while time.monotonic() < deadline:
-            if not file_path.exists():
-                return False
-
-            if not file_path.is_file():
+        while (
+            time.monotonic()
+            < deadline
+        ):
+            if (
+                not file_path.exists()
+                or not file_path.is_file()
+            ):
                 return False
 
             try:
-                current_size = file_path.stat().st_size
+                current_size = (
+                    file_path.stat().st_size
+                )
 
                 with file_path.open("rb"):
                     pass
 
-            except (OSError, PermissionError):
+            except (
+                OSError,
+                PermissionError,
+            ):
                 stable_checks = 0
+
                 time.sleep(
-                    AppConfig.FILE_READY_CHECK_INTERVAL
+                    AppConfig
+                    .FILE_READY_CHECK_INTERVAL
                 )
+
                 continue
 
-            if current_size == previous_size:
+            if (
+                current_size
+                == previous_size
+            ):
                 stable_checks += 1
+
             else:
-                previous_size = current_size
+                previous_size = (
+                    current_size
+                )
                 stable_checks = 0
 
             if (
                 stable_checks
-                >= AppConfig.FILE_STABLE_CHECKS_REQUIRED
+                >= AppConfig
+                .FILE_STABLE_CHECKS_REQUIRED
             ):
                 return True
 
             time.sleep(
-                AppConfig.FILE_READY_CHECK_INTERVAL
+                AppConfig
+                .FILE_READY_CHECK_INTERVAL
             )
 
         return False
 
-    def _print_result(self, result: ScanResult) -> None:
+    def _print_result(
+        self,
+        result: ScanResult,
+    ) -> None:
         print()
-        print("=== Scan completed ===")
-        print("File:", result.target_path)
-        print("Status:", result.status.value)
-        print("Risk level:", result.risk_level.value)
-        print("Risk score:", result.risk_score)
-        print("Files checked:", result.total_files_checked)
-        print("Threats found:", result.total_threats_found)
+        print(
+            "=== Scan completed ==="
+        )
+        print(
+            "File:",
+            result.target_path,
+        )
+        print(
+            "Status:",
+            result.status.value,
+        )
+        print(
+            "Risk level:",
+            result.risk_level.value,
+        )
+        print(
+            "Risk score:",
+            result.risk_score,
+        )
+        print(
+            "Files checked:",
+            result.total_files_checked,
+        )
+        print(
+            "Threats found:",
+            result.total_threats_found,
+        )
 
         if result.error_message:
-            print("Error:", result.error_message)
+            print(
+                "Error:",
+                result.error_message,
+            )
 
-        for threat in result.archive_threats:
-            print("[ARCHIVE]", threat.description)
+        for threat in (
+            result.archive_threats
+        ):
+            print(
+                "[ARCHIVE]",
+                threat.description,
+            )
 
-        for file_result in result.file_results:
-            for threat in file_result.threats:
+        for file_result in (
+            result.file_results
+        ):
+            for threat in (
+                file_result.threats
+            ):
                 print(
                     "[FILE]",
-                    file_result.file_path.name,
+                    file_result
+                    .file_path
+                    .name,
                     "-",
                     threat.description,
                 )
 
 
-class DownloadsWatcher(FileWatcherInterface):
+class DownloadsWatcher(
+    FileWatcherInterface
+):
     def __init__(
         self,
         scanner: ScannerServiceInterface,
         notifier: NotifierInterface,
         reporting_service: ReportingService,
-        on_scan_completed: Callable[[ScanResult], None],
+        on_scan_completed: Callable[
+            [ScanResult],
+            None,
+        ],
         downloads_dir: Path | None = None,
     ) -> None:
         self._scanner = scanner
         self._notifier = notifier
-        self._reporting_service = reporting_service
-        self._on_scan_completed = on_scan_completed
+        self._reporting_service = (
+            reporting_service
+        )
+        self._on_scan_completed = (
+            on_scan_completed
+        )
 
         self._downloads_dir = (
-            downloads_dir or AppConfig.DOWNLOADS_DIR
+            downloads_dir
+            or AppConfig.DOWNLOADS_DIR
         )
 
         self._observer = Observer()
 
-        self._executor = ThreadPoolExecutor(
-            max_workers=2,
-            thread_name_prefix="file-scanner",
+        self._executor = (
+            ThreadPoolExecutor(
+                max_workers=2,
+                thread_name_prefix=(
+                    "file-scanner"
+                ),
+            )
         )
 
         self._logger = setup_logger()
@@ -253,23 +406,43 @@ class DownloadsWatcher(FileWatcherInterface):
         if self._started:
             return
 
-        if not self._downloads_dir.exists():
+        if (
+            not self._downloads_dir
+            .exists()
+        ):
             raise FileNotFoundError(
                 "Downloads folder does not exist: "
                 f"{self._downloads_dir}"
             )
 
-        handler = DownloadsEventHandler(
-            scanner=self._scanner,
-            notifier=self._notifier,
-            reporting_service=self._reporting_service,
-            executor=self._executor,
-            on_scan_completed=self._on_scan_completed,
+        if (
+            not self._downloads_dir
+            .is_dir()
+        ):
+            raise NotADirectoryError(
+                "Downloads path is not a directory: "
+                f"{self._downloads_dir}"
+            )
+
+        handler = (
+            DownloadsEventHandler(
+                scanner=self._scanner,
+                notifier=self._notifier,
+                reporting_service=(
+                    self._reporting_service
+                ),
+                executor=self._executor,
+                on_scan_completed=(
+                    self._on_scan_completed
+                ),
+            )
         )
 
         self._observer.schedule(
             event_handler=handler,
-            path=str(self._downloads_dir),
+            path=str(
+                self._downloads_dir
+            ),
             recursive=False,
         )
 
@@ -304,4 +477,6 @@ class DownloadsWatcher(FileWatcherInterface):
             "Downloads watcher stopped"
         )
 
-        print("Downloads watcher stopped")
+        print(
+            "Downloads watcher stopped"
+        )

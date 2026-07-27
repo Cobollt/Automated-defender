@@ -27,7 +27,7 @@ class FileAnalyzer:
         ".app",
     }
 
-    SUSPICIOUS_STRINGS = [
+    SUSPICIOUS_STRINGS = (
         b"powershell",
         b"cmd.exe",
         b"wscript",
@@ -42,10 +42,11 @@ class FileAnalyzer:
         b"virtualalloc",
         b"writeprocessmemory",
         b"chmod +x",
-    ]
+    )
 
     ENTROPY_LIMIT = 7.2
-    MAX_READ_SIZE = 1024 * 1024
+    MIN_ENTROPY_SAMPLE_SIZE = 1024
+    SAMPLE_CHUNK_SIZE = 1024 * 1024
 
     def __init__(
         self,
@@ -58,6 +59,19 @@ class FileAnalyzer:
         file_path: Path,
         relative_path: str | None = None,
     ) -> FileScanResult:
+        file_path = Path(file_path)
+
+        if not file_path.exists():
+            raise FileNotFoundError(
+                f"File does not exist: {file_path}"
+            )
+
+        if not file_path.is_file():
+            raise ValueError(
+                "File analyzer accepts only regular files: "
+                f"{file_path}"
+            )
+
         sha256 = calculate_sha256(file_path)
         data = self._read_sample(file_path)
 
@@ -109,24 +123,60 @@ class FileAnalyzer:
         self,
         file_path: Path,
     ) -> bytes:
+        file_size = file_path.stat().st_size
+
         with file_path.open("rb") as file:
-            return file.read(self.MAX_READ_SIZE)
+            head = file.read(
+                self.SAMPLE_CHUNK_SIZE
+            )
+
+            if file_size <= self.SAMPLE_CHUNK_SIZE:
+                return head
+
+            tail_size = min(
+                self.SAMPLE_CHUNK_SIZE,
+                file_size - len(head),
+            )
+
+            if tail_size <= 0:
+                return head
+
+            file.seek(
+                -tail_size,
+                2,
+            )
+
+            tail = file.read(
+                tail_size
+            )
+
+        return head + tail
 
     def _check_extension(
         self,
         file_path: Path,
         relative_path: str | None,
     ) -> list[DetectedThreat]:
-        extension = file_path.suffix.lower()
+        extension = self._effective_suffix(
+            file_path=file_path,
+            relative_path=relative_path,
+        )
 
-        if extension not in self.SUSPICIOUS_EXTENSIONS:
+        if (
+            extension
+            not in self.SUSPICIOUS_EXTENSIONS
+        ):
             return []
 
         return [
             DetectedThreat(
-                threat_type=ThreatType.SUSPICIOUS_EXTENSION,
+                threat_type=(
+                    ThreatType
+                    .SUSPICIOUS_EXTENSION
+                ),
                 description=(
-                    f"Suspicious file extension: {extension}"
+                    "Suspicious file extension: "
+                    f"{extension}"
                 ),
                 score=20,
                 file_path=file_path,
@@ -140,38 +190,54 @@ class FileAnalyzer:
         data: bytes,
         relative_path: str | None,
     ) -> list[DetectedThreat]:
-        detected_type = FileTypeDetector.detect(data)
+        detected_type = (
+            FileTypeDetector.detect(
+                data
+            )
+        )
 
         if detected_type is None:
             return []
 
         if detected_type.is_executable:
-            threat_type = ThreatType.EXECUTABLE_SIGNATURE
-            score = 30
+            return [
+                DetectedThreat(
+                    threat_type=(
+                        ThreatType
+                        .EXECUTABLE_SIGNATURE
+                    ),
+                    description=(
+                        "Detected executable "
+                        "signature: "
+                        f"{detected_type.name}"
+                    ),
+                    score=30,
+                    file_path=file_path,
+                    relative_path=relative_path,
+                )
+            ]
 
-        elif detected_type.is_archive:
-            threat_type = ThreatType.UNKNOWN_FORMAT
-            score = 5
+        if detected_type.is_archive:
+            return [
+                DetectedThreat(
+                    threat_type=(
+                        ThreatType
+                        .UNSUPPORTED_ARCHIVE
+                    ),
+                    description=(
+                        "Archive signature "
+                        "reached file analysis "
+                        "without a matching "
+                        "archive reader: "
+                        f"{detected_type.name}"
+                    ),
+                    score=10,
+                    file_path=file_path,
+                    relative_path=relative_path,
+                )
+            ]
 
-        elif detected_type.is_document:
-            threat_type = ThreatType.UNKNOWN_FORMAT
-            score = 5
-
-        else:
-            return []
-
-        return [
-            DetectedThreat(
-                threat_type=threat_type,
-                description=(
-                    "Detected file signature: "
-                    f"{detected_type.name}"
-                ),
-                score=score,
-                file_path=file_path,
-                relative_path=relative_path,
-            )
-        ]
+        return []
 
     def _check_suspicious_strings(
         self,
@@ -179,16 +245,29 @@ class FileAnalyzer:
         data: bytes,
         relative_path: str | None,
     ) -> list[DetectedThreat]:
-        threats: list[DetectedThreat] = []
-        lowered_data = data.lower()
+        threats: list[
+            DetectedThreat
+        ] = []
 
-        for marker in self.SUSPICIOUS_STRINGS:
-            if marker not in lowered_data:
+        lowered_data = (
+            data.lower()
+        )
+
+        for marker in (
+            self.SUSPICIOUS_STRINGS
+        ):
+            if (
+                marker
+                not in lowered_data
+            ):
                 continue
 
             threats.append(
                 DetectedThreat(
-                    threat_type=ThreatType.SUSPICIOUS_STRING,
+                    threat_type=(
+                        ThreatType
+                        .SUSPICIOUS_STRING
+                    ),
                     description=(
                         "Suspicious string found: "
                         f"{marker.decode(errors='ignore')}"
@@ -207,19 +286,65 @@ class FileAnalyzer:
         data: bytes,
         relative_path: str | None,
     ) -> list[DetectedThreat]:
-        entropy = calculate_entropy(data)
+        if (
+            len(data)
+            < self.MIN_ENTROPY_SAMPLE_SIZE
+        ):
+            return []
 
-        if entropy <= self.ENTROPY_LIMIT:
+        entropy = (
+            calculate_entropy(
+                data
+            )
+        )
+
+        if (
+            entropy
+            <= self.ENTROPY_LIMIT
+        ):
             return []
 
         return [
             DetectedThreat(
-                threat_type=ThreatType.HIGH_ENTROPY,
+                threat_type=(
+                    ThreatType
+                    .HIGH_ENTROPY
+                ),
                 description=(
-                    f"High entropy detected: {entropy:.2f}"
+                    "High entropy detected: "
+                    f"{entropy:.2f}"
                 ),
                 score=20,
                 file_path=file_path,
                 relative_path=relative_path,
             )
         ]
+
+    @staticmethod
+    def _effective_suffix(
+        file_path: Path,
+        relative_path: str | None,
+    ) -> str:
+        if relative_path:
+            member_name = (
+                relative_path
+                .rsplit(
+                    "!/",
+                    1,
+                )[-1]
+            )
+
+            suffix = (
+                Path(member_name)
+                .suffix
+                .lower()
+            )
+
+            if suffix:
+                return suffix
+
+        return (
+            file_path
+            .suffix
+            .lower()
+        )

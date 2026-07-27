@@ -44,7 +44,10 @@ class FileTypeDetector:
             is_executable=True,
         ),
         b"PK\x03\x04": FileSignature(
-            name="ZIP or Office Open XML archive",
+            name=(
+                "ZIP or Office "
+                "Open XML archive"
+            ),
             is_archive=True,
         ),
         b"PK\x05\x06": FileSignature(
@@ -83,9 +86,14 @@ class FileTypeDetector:
             name="PDF document",
             is_document=True,
         ),
-        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1": FileSignature(
-            name="Microsoft Compound File",
-            is_document=True,
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1": (
+            FileSignature(
+                name=(
+                    "Microsoft "
+                    "Compound File"
+                ),
+                is_document=True,
+            )
         ),
         b"{\\rtf": FileSignature(
             name="RTF document",
@@ -105,6 +113,16 @@ class FileTypeDetector:
         ),
     }
 
+    ORDERED_SIGNATURES = tuple(
+        sorted(
+            SIGNATURES.items(),
+            key=lambda item: len(
+                item[0]
+            ),
+            reverse=True,
+        )
+    )
+
     @classmethod
     def detect(
         cls,
@@ -113,17 +131,18 @@ class FileTypeDetector:
         if not data:
             return None
 
-        ordered_signatures = sorted(
-            cls.SIGNATURES.items(),
-            key=lambda item: len(item[0]),
-            reverse=True,
-        )
-
-        for signature, file_signature in ordered_signatures:
-            if data.startswith(signature):
+        for (
+            signature,
+            file_signature,
+        ) in cls.ORDERED_SIGNATURES:
+            if data.startswith(
+                signature
+            ):
                 return file_signature
 
-        if cls._is_tar(data):
+        if cls._is_tar(
+            data
+        ):
             return FileSignature(
                 name="TAR archive",
                 is_archive=True,
@@ -132,17 +151,27 @@ class FileTypeDetector:
         return None
 
     @staticmethod
-    def _is_tar(data: bytes) -> bool:
+    def _is_tar(
+        data: bytes,
+    ) -> bool:
         tar_magic_offset = 257
         tar_magic = b"ustar"
 
-        if len(data) < tar_magic_offset + len(tar_magic):
+        end_offset = (
+            tar_magic_offset
+            + len(tar_magic)
+        )
+
+        if (
+            len(data)
+            < end_offset
+        ):
             return False
 
         return (
             data[
                 tar_magic_offset:
-                tar_magic_offset + len(tar_magic)
+                end_offset
             ]
             == tar_magic
         )

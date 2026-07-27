@@ -1,6 +1,8 @@
 import platform
 
-from domain.interfaces import AutostartServiceInterface
+from domain.interfaces import (
+    AutostartServiceInterface,
+)
 from platform_services.autostart.macos_autostart import (
     MacOSAutostartService,
 )
@@ -14,13 +16,32 @@ from platform_services.autostart.windows_autostart import (
 
 class AutostartFactory:
     @staticmethod
-    def create() -> AutostartServiceInterface:
-        system_name = platform.system().lower()
+    def create(
+        system_name: (
+            str | None
+        ) = None,
+    ) -> AutostartServiceInterface:
+        current_system = (
+            system_name
+            or platform.system()
+        )
 
-        if system_name == "darwin":
-            return MacOSAutostartService()
+        if (
+            current_system
+            == "Darwin"
+        ):
+            return (
+                MacOSAutostartService()
+            )
 
-        if system_name == "windows":
-            return WindowsAutostartService()
+        if (
+            current_system
+            == "Windows"
+        ):
+            return (
+                WindowsAutostartService()
+            )
 
-        return UnsupportedAutostartService()
+        return (
+            UnsupportedAutostartService()
+        )
