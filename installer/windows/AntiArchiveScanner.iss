@@ -255,26 +255,12 @@ Filename: "taskkill.exe"; \
 
 [Code]
 
-function IsUpgrade(): Boolean;
-begin
-  Result :=
-    RegKeyExists(
-      HKEY_CURRENT_USER,
-      'Software\Microsoft\Windows\CurrentVersion\Uninstall\' +
-      ExpandConstant(
-        '{#SetupSetting("AppId")}_is1'
-      )
-    );
-end;
-
-
 procedure StopApplication(
   ProcessName: String
 );
 var
   ResultCode: Integer;
 begin
-
   Exec(
     'taskkill.exe',
     '/F /IM "' + ProcessName + '"',
@@ -283,13 +269,11 @@ begin
     ewWaitUntilTerminated,
     ResultCode
   );
-
 end;
 
 
 procedure StopRunningApplication();
 begin
-
   StopApplication(
     '{#AppExeName}'
   );
@@ -298,11 +282,10 @@ begin
     '{#UpdaterExeName}'
   );
 
-  ; Поддержка старого имени updater.
+  { Поддержка старого имени updater }
   StopApplication(
     'Update.exe'
   );
-
 end;
 
 
@@ -310,14 +293,10 @@ procedure CurStepChanged(
   CurStep: TSetupStep
 );
 begin
-
   if CurStep = ssInstall then
   begin
-
     StopRunningApplication();
-
   end;
-
 end;
 
 
@@ -325,12 +304,8 @@ procedure CurUninstallStepChanged(
   CurUninstallStep: TUninstallStep
 );
 begin
-
   if CurUninstallStep = usUninstall then
   begin
-
     StopRunningApplication();
-
   end;
-
 end;

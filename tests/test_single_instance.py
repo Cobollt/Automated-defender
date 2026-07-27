@@ -277,29 +277,44 @@ def test_lock_file_contains_current_process_id(
         )
     )
 
-    try:
-        assert (
-            lock.acquire()
-            is True
-        )
+    assert (
+        lock.acquire()
+        is True
+    )
 
-        owner_pid = (
-            lock_path
-            .read_text(
-                encoding="utf-8"
-            )
-            .strip()
-        )
+    assert (
+        lock.acquired
+        is True
+    )
 
-        assert (
-            owner_pid
-            == str(
-                os.getpid()
-            )
-        )
+    # На Windows msvcrt.locking()
+    # может запрещать чтение файла
+    # через второй дескриптор,
+    # пока блокировка удерживается.
+    #
+    # Поэтому сначала освобождаем lock,
+    # затем проверяем записанный PID.
+    lock.release()
 
-    finally:
-        lock.release()
+    assert (
+        lock.acquired
+        is False
+    )
+
+    owner_pid = (
+        lock_path
+        .read_text(
+            encoding="utf-8"
+        )
+        .strip()
+    )
+
+    assert (
+        owner_pid
+        == str(
+            os.getpid()
+        )
+    )
 
 
 def test_existing_unlocked_file_does_not_block_start(
@@ -310,6 +325,9 @@ def test_existing_unlocked_file_does_not_block_start(
         / "application.lock"
     )
 
+    # Имитируем lock-файл,
+    # оставшийся после старого
+    # завершившегося процесса.
     lock_path.write_text(
         "999999\n",
         encoding="utf-8",
@@ -321,25 +339,34 @@ def test_existing_unlocked_file_does_not_block_start(
         )
     )
 
-    try:
-        assert (
-            lock.acquire()
-            is True
-        )
+    assert (
+        lock.acquire()
+        is True
+    )
 
-        assert (
-            lock_path
-            .read_text(
-                encoding="utf-8"
-            )
-            .strip()
-            == str(
-                os.getpid()
-            )
-        )
+    assert (
+        lock.acquired
+        is True
+    )
 
-    finally:
-        lock.release()
+    # Сам факт существования файла
+    # не должен мешать получению
+    # системной блокировки.
+    lock.release()
+
+    # После освобождения lock
+    # можно безопасно проверить,
+    # что старый PID был заменён.
+    assert (
+        lock_path
+        .read_text(
+            encoding="utf-8"
+        )
+        .strip()
+        == str(
+            os.getpid()
+        )
+    )
 
 
 def test_parent_directory_is_created_automatically(
