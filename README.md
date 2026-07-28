@@ -18,7 +18,7 @@ https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/window
 
 Download the macOS installer:
 
-https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/macos/AntiArchiveScanner.dmg
+https://raw.githubusercontent.com/Cobollt/Automated-defender/main/release/macos/AntiArchiveScanner.dmg - In progres
 
 ---
 
