@@ -155,7 +155,7 @@ The project currently distributes installers directly from the repository rather
 
 ## Development setup
 
-Python 3.12 is recommended for release builds.
+Python 3.14 is recommended for release builds.
 
 Create a virtual environment:
 
