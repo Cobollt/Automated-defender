@@ -343,6 +343,79 @@ def validate_builds(
 
 
 # ---------------------------------------------------------
+# Code signing
+# ---------------------------------------------------------
+
+def remove_existing_signature(
+    bundle_path: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            "codesign",
+            "--remove-signature",
+            str(bundle_path),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    stderr = (
+        result.stderr
+        or ""
+    ).strip()
+
+    if (
+        result.returncode != 0
+        and "code object is not signed at all"
+        not in stderr
+    ):
+        raise DmgBuildError(
+            "Не удалось удалить "
+            "старую подпись:\n"
+            f"{bundle_path}\n"
+            f"{stderr or 'Неизвестная ошибка.'}"
+        )
+
+
+def sign_bundle_for_testing(
+    bundle_path: Path,
+) -> None:
+    remove_existing_signature(
+        bundle_path
+    )
+
+    run_command(
+        [
+            "codesign",
+            "--force",
+            "--deep",
+            "--sign",
+            "-",
+            str(bundle_path),
+        ],
+        f"Подписание {bundle_path.name}",
+    )
+
+
+def verify_bundle_signature(
+    bundle_path: Path,
+) -> None:
+    run_command(
+        [
+            "codesign",
+            "--verify",
+            "--deep",
+            "--strict",
+            "--verbose=4",
+            str(bundle_path),
+        ],
+        f"Проверка подписи {bundle_path.name}",
+    )
+
+
+# ---------------------------------------------------------
 # Version metadata
 # ---------------------------------------------------------
 
@@ -682,9 +755,9 @@ def copy_documentation(
         "\"Проверить обновления.command\" "
         "в установочном образе.\n\n"
         "Если macOS блокирует первый запуск "
-        "неподписанной сборки, откройте "
-        "приложение через Finder: "
-        "правый клик → Открыть.\n"
+        "тестовой сборки, скопируйте приложение "
+        "в Applications, затем откройте его "
+        "через Finder: правый клик → Открыть.\n"
     )
 
     instructions_path = (
@@ -743,6 +816,22 @@ def prepare_staging_directory(
             ),
             version=version,
         )
+    )
+
+    sign_bundle_for_testing(
+        embedded_updater
+    )
+
+    verify_bundle_signature(
+        embedded_updater
+    )
+
+    sign_bundle_for_testing(
+        staged_application
+    )
+
+    verify_bundle_signature(
+        staged_application
     )
 
     create_applications_link(
@@ -1012,6 +1101,14 @@ def verify_dmg_contents(
                 ),
             )
 
+            verify_bundle_signature(
+                mounted_updater
+            )
+
+            verify_bundle_signature(
+                mounted_app
+            )
+
             if (
                 not applications_link
                 .is_symlink()
@@ -1090,6 +1187,10 @@ def create_macos_dmg(
 
     validate_command(
         "hdiutil"
+    )
+
+    validate_command(
+        "codesign"
     )
 
     normalized_version = (
